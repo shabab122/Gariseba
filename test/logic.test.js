@@ -1,0 +1,131 @@
+'use strict';
+const assert = require('node:assert/strict');
+const { test } = require('node:test');
+const { validateRequest, normalizePhone } = require('../src/lib/validate');
+const { createAnalyzer, fallbackAnalyze, validateOutput } = require('../src/lib/ai');
+const { matchArea, estimateFor } = require('../src/lib/business');
+const { sniff } = require('../src/lib/images');
+const { buildMessage } = require('../src/lib/whatsapp');
+
+const input = {
+  request_type: 'repair', customer_name: 'Sample Driver', callback_phone: '01700000000',
+  location_text: 'Mirpur 10, Dhaka', vehicle_make: 'Toyota', vehicle_model: 'Axio',
+  symptoms: 'The front tyre is flat', consent_store: true,
+};
+
+test('phone validation supports Bengali digits and local / international formats', () => {
+  assert.equal(normalizePhone('০১৭০০০০০০০০'), '+8801700000000');
+  assert.equal(normalizePhone('+880 (17) 0000-0000'), '+8801700000000');
+  assert.equal(normalizePhone({ $ne: null }), null);
+  assert.equal(normalizePhone('01200000000'), null);
+});
+
+test('request validation requires explicit consent and accepts a Bengali year', () => {
+  const validated = validateRequest({ ...input, vehicle_year: '২০১৮' });
+  assert.equal(validated.ok, true);
+  assert.equal(validated.value.vehicle_year, 2018);
+  assert.equal(validateRequest({ ...input, consent_store: 'true', vehicle_year: '2018x' }).ok, false);
+});
+
+test('request validation rejects incomplete or non-numeric coordinates and invalid photo IDs', () => {
+  assert.equal(validateRequest({ ...input, map_lng: 90.4 }).ok, false);
+  assert.equal(validateRequest({ ...input, map_lat: true, map_lng: 90.4 }).ok, false);
+  assert.equal(validateRequest({ ...input, photo_ids: [{ $ne: 'x' }] }).ok, false);
+  assert.equal(validateRequest({ ...input, map_lat: 23.8, map_lng: 90.4 }).ok, true);
+});
+
+test('location matching uses whole words, Unicode and configured outside keywords', async () => {
+  const mock = {
+    settings: { findOne: async () => ({ outside_keywords: 'সিলেট,khulna' }) },
+    areas: { find: () => ({ sort: () => ({ toArray: async () => [
+      { _id: 'dhaka', name_en: 'Dhaka', name_bn: 'ঢাকা', keywords: '' },
+      { _id: 'mirpur', name_en: 'Mirpur', name_bn: 'মিরপুর', keywords: 'pallabi' },
+    ] }) }) },
+  };
+  assert.equal((await matchArea(mock, 'মিরপুর ১০, ঢাকা')).area._id, 'mirpur');
+  assert.equal((await matchArea(mock, 'Dhaka Road, Khulna')).status, 'outside');
+  assert.equal((await matchArea(mock, 'সিলেট')).status, 'outside');
+  assert.equal((await matchArea(mock, 'dhakaville')).status, 'unknown');
+});
+
+test('sample pricing stays marked when the global flag is off', async () => {
+  const mock = {
+    settings: { findOne: async () => ({ pricing_is_sample: false }) },
+    pricing: { find: () => ({ sort: () => ({ toArray: async () => [
+      { _id: 'sample_test', min_bdt: 300, max_bdt: 500, label_en: 'Tyre', sample: true },
+    ] }) }) },
+  };
+  assert.equal((await estimateFor(mock, 'tyre', 'en')).sample, true);
+});
+
+test('the assistant detects fire, smoke and brake failure in both languages', () => {
+  for (const symptoms of ['Engine smoking', 'Brakes not working', 'ইঞ্জিন থেকে ধোঁয়া', 'ব্রেক কাজ করে না']) {
+    const result = fallbackAnalyze({ symptoms, language: 'bn' });
+    assert.equal(result.source, 'safety', symptoms);
+    assert.match(result.next_step, /৯৯৯/);
+  }
+});
+
+test('built-in follow-ups retain relevant history and favor a new explicit issue', () => {
+  const base = { language: 'en', history: ['The tyre is flat'] };
+  assert.equal(fallbackAnalyze({ ...base, symptoms: 'Can I drive?' }).category, 'tyre');
+  assert.equal(fallbackAnalyze({ ...base, symptoms: 'My battery died' }).category, 'battery');
+  assert.match(fallbackAnalyze({ ...base, symptoms: 'Can I drive?' }).summary, /cannot determine remotely/);
+});
+
+test('unsafe or malformed model replies are rejected', () => {
+  const good = { summary: 'A circuit may need inspection.', next_step: 'Keep the car parked.', questions: ['Does it click?'], safety: false };
+  assert.ok(validateOutput(good));
+  assert.equal(validateOutput({ ...good, summary: 'It will cost ৫০০ টাকা.' }), null);
+  assert.equal(validateOutput({ ...good, next_step: 'Wait 20 minutes.' }), null);
+  assert.equal(validateOutput({ ...good, questions: ['Question?', { hidden: true }] }), null);
+});
+
+test('OpenAI adapter requires consent, redacts contact patterns and bypasses emergencies', async () => {
+  let calls = 0;
+  const model = { summary: 'The battery or starter could be involved.', next_step: 'Arrange an inspection.', questions: [], safety: false };
+  const analyze = createAnalyzer({
+    provider: { provider: 'openai', key: 'mock-key', model: 'mock-model' }, configured: true,
+    fetcher: async (url, request) => {
+      calls += 1;
+      const body = JSON.parse(request.body);
+      assert.equal(url, 'https://api.openai.com/v1/responses');
+      assert.equal(body.store, false);
+      assert.match(body.input, /\[phone\]/);
+      assert.doesNotMatch(body.input, /01700000000/);
+      return Response.json({ output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(model) }] }] });
+    },
+  });
+  const data = { symptoms: 'Battery low 01700000000', language: 'en' };
+  assert.equal((await analyze(data)).source, 'fallback');
+  assert.equal((await analyze({ ...data, consent_ai: true })).source, 'model');
+  assert.equal((await analyze({ ...data, symptoms: 'Fire inside the car', consent_ai: true })).source, 'safety');
+  assert.equal(calls, 1);
+});
+
+test('Anthropic adapter handles a valid response and falls back on rejected output', async () => {
+  const model = { summary: 'There may be a tyre puncture.', next_step: 'Arrange assistance.', questions: [], safety: false };
+  const provider = { provider: 'anthropic', key: 'mock-key', model: 'mock-model' };
+  const good = createAnalyzer({ provider, configured: true, fetcher: async (url, request) => {
+    assert.equal(url, 'https://api.anthropic.com/v1/messages');
+    assert.equal(request.headers['anthropic-version'], '2023-06-01');
+    return Response.json({ content: [{ type: 'text', text: JSON.stringify(model) }] });
+  } });
+  const invalid = createAnalyzer({ provider, configured: true, fetcher: async () =>
+    Response.json({ content: [{ type: 'text', text: JSON.stringify({ ...model, next_step: 'It costs 30 taka.' }) }] }),
+  });
+  const data = { symptoms: 'Flat tyre', language: 'en', consent_ai: true };
+  assert.equal((await good(data)).source, 'model');
+  assert.equal((await invalid(data)).provider_unavailable, true);
+});
+
+test('file signatures and WhatsApp message exclude unsupported content and private key', () => {
+  assert.equal(sniff(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>')), null);
+  const message = buildMessage({
+    ...input, language: 'en', public_code: 'LN-ABC234', tracking_token_hash: 'secret-key',
+    estimate: { min: 300, max: 800, sample: true }, next_step: 'technician', urgency: 'normal',
+  }, { photoCount: 1 });
+  assert.match(message, /LN-ABC234/);
+  assert.match(message, /not attached/);
+  assert.doesNotMatch(message, /secret-key|৳300/);
+});
