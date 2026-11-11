@@ -142,4 +142,39 @@ function createAnalyzer({ provider = config.ai, configured = config.aiConfigured
   };
 }
 
-module.exports = { createAnalyzer, fallbackAnalyze, redact, validateOutput };
+const connectionErrors = {
+  provider_http_400: 'OpenAI rejected the test. Check that the configured model supports the Responses API.',
+  provider_http_401: 'OpenAI rejected the API key. Check its validity and API project.',
+  provider_http_403: 'OpenAI denied access. Check the API key permissions and project access.',
+  provider_http_404: 'OpenAI could not find the configured model. Check the model ID and project access.',
+  provider_http_429: 'OpenAI limited the request. Check API credits, project quota and rate limits.',
+  provider_incomplete: 'OpenAI returned an incomplete response. Try again or check the configured model.',
+  provider_incomplete_max_output_tokens: 'The configured model reached the output limit before completing its answer.',
+  provider_empty_output: 'OpenAI returned an empty answer. Check the configured model and try again.',
+  provider_invalid_output: 'OpenAI responded, but its answer did not pass the assistant validation.',
+  provider_timeout: 'The OpenAI request timed out. Check the server network connection and try again.',
+  provider_error: 'The OpenAI test failed. Check the server network connection and OpenAI service availability.',
+};
+
+async function testOpenAIConnection({ provider = config.ai, fetcher = fetch } = {}) {
+  const result = { checkedAt: new Date().toISOString() };
+  if (provider.provider !== 'openai') {
+    return { ...result, ok: false, code: 'provider_not_openai', message: 'Set AI_PROVIDER=openai in the server environment and restart the app.' };
+  }
+  if (!provider.key || !provider.model) {
+    return { ...result, ok: false, code: 'not_configured', message: 'Set AI_API_KEY and AI_MODEL in the server environment and restart the app.' };
+  }
+  try {
+    await requestModel({
+      language: 'en', symptoms: 'My car clicks when I turn the key.', history: [],
+    }, provider, fetcher);
+    return { ...result, ok: true, code: 'connected', message: 'OpenAI returned a valid assistant response using the current server settings.' };
+  } catch (error) {
+    let code = Object.hasOwn(connectionErrors, error.message) ? error.message : 'provider_error';
+    if (error.name === 'TimeoutError' || error.name === 'AbortError') code = 'provider_timeout';
+    if (error instanceof SyntaxError) code = 'provider_invalid_output';
+    return { ...result, ok: false, code, message: connectionErrors[code] };
+  }
+}
+
+module.exports = { createAnalyzer, fallbackAnalyze, redact, validateOutput, testOpenAIConnection };

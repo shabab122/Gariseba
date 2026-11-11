@@ -25,6 +25,7 @@ async function connectDatabase({ uri = config.mongoUri, dbName = config.mongoDb 
       collections.sessions.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
       collections.pricing.createIndex({ category: 1, active: 1, min_bdt: 1 }),
       collections.audit.createIndex({ at: -1 }),
+      collections.audit.createIndex({ event: 1 }),
     ]);
     return { client, db, ...collections };
   } catch (error) {

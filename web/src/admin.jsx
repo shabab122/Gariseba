@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   ArrowDownLeft, ArrowLeft, ArrowRight, ArrowUpRight, ClipboardList, Gauge, History, LockKeyhole,
-  LogOut, Search, Settings2, ShieldCheck, Trash2, TriangleAlert,
+  Bell, LogOut, RefreshCw, Search, Settings2, ShieldCheck, Trash2, TriangleAlert,
 } from 'lucide-react';
 import { api, updateCsrf } from './api.js';
 import { AdminConfig, useMutation } from './admin-config.jsx';
@@ -11,6 +11,63 @@ import { Alert, Brand, Checkbox, dateTime, Dialog, Field, Status } from './ui.js
 
 const statusNames = { received: 'Received', confirmed: 'Confirmed', in_progress: 'In progress', completed: 'Completed', cancelled: 'Cancelled', out_of_area: 'Outside area' };
 const emptyQueueFilters = { code: '', type: '', urgency: '', from: '', to: '' };
+
+function QueueUpdates({ username, refresh, refreshed }) {
+  const [total, setTotal] = useState(null);
+  const [seen, setSeen] = useState(null);
+  const [error, setError] = useState('');
+  const [retry, setRetry] = useState(0);
+  const acknowledgeTo = useRef(null);
+  const received = Math.max(0, (total ?? 0) - (seen ?? 0));
+  useEffect(() => {
+    if (acknowledgeTo.current !== null) {
+      setSeen(acknowledgeTo.current);
+      acknowledgeTo.current = null;
+    }
+  }, [refreshed]);
+  useEffect(() => {
+    const controller = new AbortController();
+    let pending = false;
+    async function check() {
+      if (pending || document.hidden || controller.signal.aborted) return;
+      pending = true;
+      try {
+        const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(12000)]);
+        const result = await api('/admin/queue-updates', { signal });
+        if (controller.signal.aborted) return;
+        if (!Number.isSafeInteger(result.totalReceived) || result.totalReceived < 0) throw new Error('Invalid queue update.');
+        setTotal(result.totalReceived);
+        setSeen((current) => current === null || current > result.totalReceived ? result.totalReceived : current);
+        setError('');
+      } catch {
+        if (!controller.signal.aborted) setError('New-request alerts could not refresh. The next check will retry.');
+      } finally {
+        pending = false;
+      }
+    }
+    check();
+    const timer = window.setInterval(check, 30000);
+    document.addEventListener('visibilitychange', check);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', check);
+      controller.abort();
+    };
+  }, [username, retry]);
+
+  return <div className="mb-4">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <p className="muted flex items-center gap-2 text-sm" role="status" aria-live="polite">
+        <Bell size={16} />{received > 0 ? `${received} new request${received === 1 ? '' : 's'} received` : 'New-request alerts check every 30 seconds.'}
+      </p>
+      <button type="button" className="btn btn-outline" onClick={() => { acknowledgeTo.current = total; refresh(); }}>
+        <RefreshCw size={16} />Refresh queue{received > 0 && <span className="badge">{received}</span>}
+      </button>
+    </div>
+    {received > 0 && <p className="muted mt-2 text-sm">Refresh the queue to review arrivals. Your filters still apply.</p>}
+    {error && <Alert kind="warning">{error} <button type="button" className="text-link" onClick={() => setRetry((value) => value + 1)}>Retry alerts</button></Alert>}
+  </div>;
+}
 
 function Login({ onLogin }) {
   const [username, setUsername] = useState('');
@@ -44,24 +101,48 @@ function Login({ onLogin }) {
   </div>;
 }
 
-function Queue({ open }) {
-  const [status, setStatus] = useState('');
-  const [draft, setDraft] = useState(emptyQueueFilters);
-  const [filters, setFilters] = useState(emptyQueueFilters);
-  const [page, setPage] = useState(1);
+function Queue({ open, refreshVersion, onLoaded }) {
+  const [params, setParams] = useSearchParams();
+  const status = Object.hasOwn(statusNames, params.get('status')) ? params.get('status') : '';
+  const pageValue = Number(params.get('page'));
+  const page = Number.isInteger(pageValue) && pageValue >= 1 && pageValue <= 500 ? pageValue : 1;
+  const code = params.get('code') || '';
+  const type = params.get('type') || '';
+  const urgency = params.get('urgency') || '';
+  const from = params.get('from') || '';
+  const to = params.get('to') || '';
+  const filters = useMemo(() => ({ code, type, urgency, from, to }), [code, type, urgency, from, to]);
+  const [draft, setDraft] = useState(filters);
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [reload, setReload] = useState(0);
+  useEffect(() => { setDraft(filters); }, [filters]);
   useEffect(() => {
     const controller = new AbortController();
     setData(null);
     setError('');
     const query = new URLSearchParams({ status, ...filters, page });
     api('/admin/requests?' + query, { signal: controller.signal })
-      .then((result) => { if (!controller.signal.aborted) setData(result); })
+      .then((result) => {
+        if (controller.signal.aborted) return;
+        if (!Array.isArray(result.requests)) throw new Error('The request list could not be loaded. Try again.');
+        setData(result);
+        onLoaded(refreshVersion);
+      })
       .catch((err) => { if (!controller.signal.aborted) setError(err.message); });
     return () => controller.abort();
-  }, [status, filters, page, reload]);
+  }, [status, filters, page, reload, refreshVersion, onLoaded]);
+
+  function updateView(values) {
+    setParams((current) => {
+      const next = new URLSearchParams(current);
+      for (const [key, value] of Object.entries(values)) {
+        if (value === '' || value === 1) next.delete(key);
+        else next.set(key, String(value));
+      }
+      return next;
+    });
+  }
 
   function editFilter(event) {
     const { name, value } = event.target;
@@ -69,14 +150,12 @@ function Queue({ open }) {
   }
   function applyFilters(event) {
     event.preventDefault();
-    setFilters({ ...draft, code: draft.code.trim() });
-    setPage(1);
+    updateView({ ...draft, code: draft.code.trim(), page: 1 });
+    setReload((value) => value + 1);
   }
   function clearFilters() {
-    setStatus('');
     setDraft(emptyQueueFilters);
-    setFilters(emptyQueueFilters);
-    setPage(1);
+    updateView({ ...emptyQueueFilters, status: '', page: 1 });
   }
 
   const counts = data?.counts || {};
@@ -84,13 +163,13 @@ function Queue({ open }) {
     <div className="admin-heading"><div><p className="eyebrow">OPERATIONS / REQUEST QUEUE</p><h1>Service requests</h1><p className="muted">Review incoming requests and post updates for customers.</p></div></div>
     <div className="queue-metrics">
       {[['Received', 'received'], ['Confirmed', 'confirmed'], ['In progress', 'in_progress'], ['Completed', 'completed']].map(([label, key]) =>
-        <button key={key} type="button" className="panel metric" aria-pressed={status === key} onClick={() => { setStatus(status === key ? '' : key); setPage(1); }}><span>{label}</span><strong>{data ? counts[key] || 0 : '—'}</strong><ArrowDownLeft size={17} /></button>
+        <button key={key} type="button" className="panel metric" aria-pressed={status === key} onClick={() => updateView({ status: status === key ? '' : key, page: 1 })}><span>{label}</span><strong>{data ? counts[key] || 0 : '—'}</strong><ArrowDownLeft size={17} /></button>
       )}
     </div>
     <section className="panel queue-panel">
       <form className="queue-toolbar" onSubmit={applyFilters}>
         <div className="grid w-full gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          <Field id="queue-status" label="Filter by status"><select id="queue-status" value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}>
+          <Field id="queue-status" label="Filter by status"><select id="queue-status" value={status} onChange={(event) => updateView({ status: event.target.value, page: 1 })}>
             <option value="">All statuses</option>{Object.entries(statusNames).map(([key, value]) => <option value={key} key={key}>{value}</option>)}
           </select></Field>
           <Field id="queue-type" label="Request type"><select id="queue-type" name="type" value={draft.type} onChange={editFilter}>
@@ -122,9 +201,9 @@ function Queue({ open }) {
         </table>
       </div>}
       {data && (data.page > 1 || data.hasNext) && <div className="pagination">
-        <button type="button" className="btn btn-outline" disabled={data.page <= 1} onClick={() => setPage(page - 1)}>Previous</button>
+        <button type="button" className="btn btn-outline" disabled={data.page <= 1} onClick={() => updateView({ page: page - 1 })}>Previous</button>
         <span>Page {data.page}</span>
-        <button type="button" className="btn btn-outline" disabled={!data.hasNext || data.page >= 500} onClick={() => setPage(page + 1)}>Next</button>
+        <button type="button" className="btn btn-outline" disabled={!data.hasNext || data.page >= 500} onClick={() => updateView({ page: page + 1 })}>Next</button>
       </div>}
     </section>
   </>;
@@ -253,6 +332,8 @@ export default function Admin() {
   const [record, setRecord] = useState(null);
   const [error, setError] = useState('');
   const [loggingOut, setLoggingOut] = useState(false);
+  const [queueVersion, setQueueVersion] = useState(0);
+  const [queueLoaded, setQueueLoaded] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
     api('/admin/me', { signal: controller.signal }).then((result) => setUser(result.user))
@@ -294,7 +375,12 @@ export default function Admin() {
         <button className="btn btn-outline" type="button" onClick={logout} disabled={loggingOut}><LogOut size={17} />{loggingOut ? 'Signing out…' : 'Sign out'}</button></div></header>
       <div className="admin-content">
         {error && <Alert>{error}</Alert>}
-        {tab === 'queue' && (record ? <Record key={record} id={record} role={user.role} back={() => open(null)} /> : <Queue open={open} />)}
+        <QueueUpdates key={user.username} username={user.username} refreshed={queueLoaded} refresh={() => {
+          setTab('queue');
+          open(null);
+          setQueueVersion((value) => value + 1);
+        }} />
+        {tab === 'queue' && (record ? <Record key={record} id={record} role={user.role} back={() => open(null)} /> : <Queue open={open} refreshVersion={queueVersion} onLoaded={setQueueLoaded} />)}
         {tab === 'settings' && <AdminConfig />}
         {tab === 'audit' && <AuditLog />}
       </div>

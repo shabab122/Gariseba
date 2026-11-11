@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const { validateRequest, normalizePhone } = require('../src/lib/validate');
-const { createAnalyzer, fallbackAnalyze, validateOutput } = require('../src/lib/ai');
+const { createAnalyzer, fallbackAnalyze, validateOutput, testOpenAIConnection } = require('../src/lib/ai');
 const { matchArea, estimateFor } = require('../src/lib/business');
 const { sniff } = require('../src/lib/images');
 const { buildMessage } = require('../src/lib/whatsapp');
@@ -136,6 +136,45 @@ test('Anthropic adapter handles a valid response and falls back on rejected outp
   const data = { symptoms: 'Flat tyre', language: 'en', consent_ai: true };
   assert.equal((await good(data)).source, 'model');
   assert.equal((await invalid(data)).provider_unavailable, true);
+});
+
+test('OpenAI connection check validates real response format and keeps credentials private', async () => {
+  const provider = { provider: 'openai', key: 'synthetic-private-key', model: 'synthetic-model' };
+  let calls = 0;
+  const fetcher = async (url, request) => {
+    calls++;
+    assert.equal(url, 'https://api.openai.com/v1/responses');
+    assert.equal(request.headers.Authorization, 'Bearer ' + provider.key);
+    const body = JSON.parse(request.body);
+    assert.equal(body.model, provider.model);
+    assert.equal(body.store, false);
+    assert.match(body.input, /My car clicks/);
+    const model = { summary: 'The battery may need inspection.', next_step: 'Arrange an inspection.', questions: [], safety: false };
+    return Response.json({ output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(model) }] }] });
+  };
+  assert.equal((await testOpenAIConnection({ provider: { ...provider, provider: 'anthropic' }, fetcher })).code, 'provider_not_openai');
+  assert.equal((await testOpenAIConnection({ provider: { ...provider, key: '' }, fetcher })).code, 'not_configured');
+  assert.equal(calls, 0);
+  const good = await testOpenAIConnection({ provider, fetcher });
+  assert.equal(good.ok, true);
+  assert.equal(good.code, 'connected');
+  assert.ok(Number.isFinite(Date.parse(good.checkedAt)));
+  assert.equal(calls, 1);
+  assert.doesNotMatch(JSON.stringify(good), /synthetic-private-key/);
+
+  for (const status of [400, 401, 403, 404, 429, 503]) {
+    const result = await testOpenAIConnection({
+      provider, fetcher: async () => Response.json({ error: { message: provider.key } }, { status }),
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.code, status === 503 ? 'provider_error' : 'provider_http_' + status);
+    assert.doesNotMatch(JSON.stringify(result), /synthetic-private-key/);
+  }
+  const timeout = await testOpenAIConnection({ provider, fetcher: async () => { throw new DOMException(provider.key, 'TimeoutError'); } });
+  assert.equal(timeout.code, 'provider_timeout');
+  assert.doesNotMatch(JSON.stringify(timeout), /synthetic-private-key/);
+  const malformed = await testOpenAIConnection({ provider, fetcher: async () => new Response('not JSON') });
+  assert.equal(malformed.code, 'provider_invalid_output');
 });
 
 test('file signatures and WhatsApp message exclude unsupported content and private key', () => {
