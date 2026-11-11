@@ -69,11 +69,11 @@ export function Dialog({ title, description, children, onClose }) {
     {children}
   </dialog>;
 }
-export function dateTime(value, lang = 'en') {
+export function dateTime(value, lang = 'en', timeStyle = 'short') {
   const date = new Date(value);
   if (!value || !Number.isFinite(date.getTime())) return '—';
   return new Intl.DateTimeFormat(lang === 'bn' ? 'bn-BD' : 'en-GB', {
-    dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Dhaka',
+    dateStyle: 'medium', timeStyle, timeZone: 'Asia/Dhaka',
   }).format(date);
 }
 export function money(value, lang) {

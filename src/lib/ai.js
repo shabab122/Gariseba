@@ -102,6 +102,10 @@ async function requestModel(input, provider, fetcher) {
     });
     if (!response.ok) throw new Error('provider_http_' + response.status);
     const data = await response.json();
+    if (data.status === 'incomplete') {
+      throw new Error(data.incomplete_details?.reason === 'max_output_tokens'
+        ? 'provider_incomplete_max_output_tokens' : 'provider_incomplete');
+    }
     text = (data.output || []).filter((item) => item.type === 'message')
       .flatMap((item) => item.content || []).filter((item) => item.type === 'output_text').map((item) => item.text).join('');
   } else {
@@ -115,7 +119,11 @@ async function requestModel(input, provider, fetcher) {
     const data = await response.json();
     text = (data.content || []).filter((item) => item.type === 'text').map((item) => item.text).join('');
   }
-  return validateOutput(JSON.parse(text.trim().replace(/^\`\`\`(?:json)?\s*|\s*\`\`\`$/gi, '')));
+  const json = text.trim().replace(/^\`\`\`(?:json)?\s*|\s*\`\`\`$/gi, '');
+  if (!json) throw new Error('provider_empty_output');
+  const model = validateOutput(JSON.parse(json));
+  if (!model) throw new Error('provider_invalid_output');
+  return model;
 }
 
 function createAnalyzer({ provider = config.ai, configured = config.aiConfigured, fetcher = fetch } = {}) {
@@ -124,10 +132,11 @@ function createAnalyzer({ provider = config.ai, configured = config.aiConfigured
     if (base.safety || !configured || input.consent_ai !== true) return base;
     try {
       const model = await requestModel(input, provider, fetcher);
-      if (model?.safety) return fallbackAnalyze({ ...input, safety_flag: true });
-      if (model) return { ...model, source: 'model', category: base.category };
+      if (model.safety) return fallbackAnalyze({ ...input, safety_flag: true });
+      return { ...model, source: 'model', category: base.category };
     } catch (error) {
-      console.warn('[assistant] Provider request failed:', error.message.startsWith('provider_http_') ? error.message : error.name);
+      const code = error.message.match(/^provider_[a-z0-9_]+$/)?.[0];
+      console.warn('[assistant] Provider request failed:', code || (error instanceof SyntaxError ? 'provider_invalid_output' : error.name));
     }
     return { ...base, provider_unavailable: true };
   };

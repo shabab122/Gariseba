@@ -1,9 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { ArrowRight, Clock3, KeyRound, LockKeyhole, NotebookPen, Search, Trash2 } from 'lucide-react';
 import { api } from './api.js';
 import { useApp } from './context.jsx';
 import { Alert, dateTime, Dialog, Field, PageIntro, Status } from './ui.jsx';
+
+const activeStatuses = ['received', 'confirmed', 'in_progress'];
+const refreshIntervalMs = 60_000;
 
 export default function Track() {
   const { t, lang, errorText } = useApp();
@@ -18,13 +21,63 @@ export default function Track() {
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [dialogError, setDialogError] = useState('');
+  const [refreshError, setRefreshError] = useState('');
+  const refreshController = useRef(null);
+  const autoRefresh = activeStatuses.includes(data?.status);
+
+  useEffect(() => {
+    if (!autoRefresh || !matched || busy || dialog) return;
+    const controller = new AbortController();
+    refreshController.current = controller;
+    let pending = false;
+    const timer = window.setInterval(async () => {
+      if (document.hidden || pending || controller.signal.aborted) return;
+      pending = true;
+      try {
+        const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]);
+        const result = await api('/requests/lookup', {
+          method: 'POST', body: { ...matched, language: lang }, signal,
+        });
+        if (controller.signal.aborted) return;
+        if (signal.aborted || !Object.hasOwn(t.statusNames, result.status) || !Array.isArray(result.history)) {
+          throw new Error('Missing tracking details.');
+        }
+        setData(result);
+        setRefreshError('');
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        if (err.status === 404) {
+          setData(null);
+          setMatched(null);
+          setError(errorText(err));
+        } else {
+          setRefreshError(errorText(err));
+        }
+      } finally {
+        pending = false;
+      }
+    }, refreshIntervalMs);
+    return () => {
+      window.clearInterval(timer);
+      controller.abort();
+      refreshController.current = null;
+    };
+  }, [autoRefresh, matched, busy, dialog, lang, errorText, t.statusNames]);
+
+  function clearResult() {
+    refreshController.current?.abort();
+    setMatched(null);
+    setData(null);
+    setError('');
+    setRefreshError('');
+  }
 
   async function check(event) {
     event.preventDefault();
+    if (busy) return;
+    clearResult();
     setBusy('lookup');
-    setError('');
     setNotice('');
-    setData(null);
     const keys = { code: code.trim(), token: token.trim() };
     try {
       setData(await api('/requests/lookup', { method: 'POST', body: { ...keys, language: lang } }));
@@ -33,6 +86,7 @@ export default function Track() {
     finally { setBusy(''); }
   }
   function open(action) {
+    refreshController.current?.abort();
     setNote('');
     setDialogError('');
     setDialog(action);
@@ -46,8 +100,7 @@ export default function Track() {
     try {
       await api('/requests/privacy', { method: 'POST', body: { ...matched, action: dialog, note } });
       if (dialog === 'delete') {
-        setData(null);
-        setMatched(null);
+        clearResult();
         setCode('');
         setToken('');
       }
@@ -62,10 +115,12 @@ export default function Track() {
     <form className="panel track-form" onSubmit={check}>
       <div className="track-icon"><KeyRound size={25} /></div>
       <Field id="reference" label={t.reference}>
-        <input id="reference" value={code} placeholder="LN-7K2M9Q" maxLength={20} required autoComplete="off" spellCheck={false} onChange={(event) => { setCode(event.target.value); setData(null); }} />
+        <input id="reference" value={code} placeholder="LN-7K2M9Q" maxLength={20} required autoComplete="off" spellCheck={false}
+          disabled={busy === 'lookup'} onChange={(event) => { setCode(event.target.value); clearResult(); }} />
       </Field>
       <Field id="tracking-token" label={t.trackingKey}>
-        <input id="tracking-token" value={token} maxLength={80} type="password" required autoComplete="off" spellCheck={false} onChange={(event) => { setToken(event.target.value); setData(null); }} />
+        <input id="tracking-token" value={token} maxLength={80} type="password" required autoComplete="off" spellCheck={false}
+          disabled={busy === 'lookup'} onChange={(event) => { setToken(event.target.value); clearResult(); }} />
       </Field>
       {error && <Alert>{error}</Alert>}
       {notice && <Alert kind="success">{notice}</Alert>}
@@ -73,8 +128,11 @@ export default function Track() {
     </form>
     {data && <section className="panel track-result" aria-label={t.status}>
       <div className="flex flex-wrap items-center justify-between gap-3"><span className="eyebrow"><Clock3 size={16} />{data.code}</span><Status value={data.status} /></div>
-      <h2>{t.statusNames[data.status]}</h2>
+      <h2 aria-live="polite">{t.statusNames[data.status]}</h2>
       <p className="muted">{data.status === 'received' ? t.pending : data.technicianConfirmed ? t.confirmed : t.statusNames[data.status]}</p>
+      <p className="muted text-sm">{t.updated} · <time dateTime={data.updated_at}>{dateTime(data.updated_at, lang, 'medium')}</time></p>
+      {autoRefresh && <p className="muted text-sm">{t.trackAutoRefresh}</p>}
+      {refreshError && <Alert kind="warning">{refreshError}</Alert>}
       <p className="muted">{t.live}</p>
       <h3>{t.statusHistory}</h3>
       <ol className="timeline">

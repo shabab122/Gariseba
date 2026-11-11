@@ -10,6 +10,7 @@ import { ThemeButton } from './layout.jsx';
 import { Alert, Brand, Checkbox, dateTime, Dialog, Field, Status } from './ui.jsx';
 
 const statusNames = { received: 'Received', confirmed: 'Confirmed', in_progress: 'In progress', completed: 'Completed', cancelled: 'Cancelled', out_of_area: 'Outside area' };
+const emptyQueueFilters = { code: '', type: '', urgency: '', from: '', to: '' };
 
 function Login({ onLogin }) {
   const [username, setUsername] = useState('');
@@ -45,8 +46,8 @@ function Login({ onLogin }) {
 
 function Queue({ open }) {
   const [status, setStatus] = useState('');
-  const [search, setSearch] = useState('');
-  const [code, setCode] = useState('');
+  const [draft, setDraft] = useState(emptyQueueFilters);
+  const [filters, setFilters] = useState(emptyQueueFilters);
   const [page, setPage] = useState(1);
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
@@ -55,10 +56,29 @@ function Queue({ open }) {
     const controller = new AbortController();
     setData(null);
     setError('');
-    api('/admin/requests?' + new URLSearchParams({ status, code, page }), { signal: controller.signal })
-      .then(setData).catch((err) => { if (err.name !== 'AbortError') setError(err.message); });
+    const query = new URLSearchParams({ status, ...filters, page });
+    api('/admin/requests?' + query, { signal: controller.signal })
+      .then((result) => { if (!controller.signal.aborted) setData(result); })
+      .catch((err) => { if (!controller.signal.aborted) setError(err.message); });
     return () => controller.abort();
-  }, [status, code, page, reload]);
+  }, [status, filters, page, reload]);
+
+  function editFilter(event) {
+    const { name, value } = event.target;
+    setDraft((current) => ({ ...current, [name]: value }));
+  }
+  function applyFilters(event) {
+    event.preventDefault();
+    setFilters({ ...draft, code: draft.code.trim() });
+    setPage(1);
+  }
+  function clearFilters() {
+    setStatus('');
+    setDraft(emptyQueueFilters);
+    setFilters(emptyQueueFilters);
+    setPage(1);
+  }
+
   const counts = data?.counts || {};
   return <>
     <div className="admin-heading"><div><p className="eyebrow">OPERATIONS / REQUEST QUEUE</p><h1>Service requests</h1><p className="muted">Review incoming requests and post updates for customers.</p></div></div>
@@ -68,13 +88,23 @@ function Queue({ open }) {
       )}
     </div>
     <section className="panel queue-panel">
-      <form className="queue-toolbar" onSubmit={(event) => { event.preventDefault(); setPage(1); setCode(search.trim()); }}>
-        <Field id="queue-status" label="Filter by status"><select id="queue-status" value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}>
-          <option value="">All statuses</option>{Object.entries(statusNames).map(([key, value]) => <option value={key} key={key}>{value}</option>)}
-        </select></Field>
-        <Field id="queue-search" label="Find a reference"><input id="queue-search" value={search} maxLength={20} placeholder="LN-7K2M9Q" onChange={(event) => setSearch(event.target.value)} /></Field>
-        <button type="submit" className="btn btn-outline"><Search size={17} />Search</button>
-        {code && <button type="button" className="text-link" onClick={() => { setCode(''); setSearch(''); setPage(1); }}>Clear</button>}
+      <form className="queue-toolbar" onSubmit={applyFilters}>
+        <div className="grid w-full gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          <Field id="queue-status" label="Filter by status"><select id="queue-status" value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}>
+            <option value="">All statuses</option>{Object.entries(statusNames).map(([key, value]) => <option value={key} key={key}>{value}</option>)}
+          </select></Field>
+          <Field id="queue-type" label="Request type"><select id="queue-type" name="type" value={draft.type} onChange={editFilter}>
+            <option value="">All types</option><option value="battery">Battery help</option><option value="repair">Repair</option><option value="other">Other</option>
+          </select></Field>
+          <Field id="queue-urgency" label="Urgency"><select id="queue-urgency" name="urgency" value={draft.urgency} onChange={editFilter}>
+            <option value="">Any urgency</option><option value="normal">Normal</option><option value="urgent">Urgent</option>
+          </select></Field>
+          <Field id="queue-from" label="Received from (Dhaka)"><input id="queue-from" type="date" name="from" value={draft.from} onChange={editFilter} /></Field>
+          <Field id="queue-to" label="Received through (Dhaka)"><input id="queue-to" type="date" name="to" min={draft.from || undefined} value={draft.to} onChange={editFilter} /></Field>
+          <Field id="queue-search" label="Find a reference"><input id="queue-search" name="code" value={draft.code} maxLength={20} placeholder="LN-7K2M9Q" onChange={editFilter} /></Field>
+        </div>
+        <button type="submit" className="btn btn-outline"><Search size={17} />Apply filters</button>
+        <button type="button" className="text-link" onClick={clearFilters}>Clear filters</button>
       </form>
       {error && <Alert>{error} <button type="button" className="text-link" onClick={() => setReload(reload + 1)}>Retry</button></Alert>}
       {!data && !error && <p className="queue-state" role="status">Loading requests…</p>}

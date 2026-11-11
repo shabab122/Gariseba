@@ -224,6 +224,32 @@ test('customer and staff workflows on a real MongoDB', { timeout: 45000 }, async
     assert.equal(row.in_service_area, false);
     assert.equal((await owner.call('/admin/requests/' + row._id, { method: 'DELETE' })).status, 200);
   });
+  await t.test('staff queue combines type, urgency, and inclusive Dhaka received dates', async () => {
+    const baseRow = { state: 'submitted', request_type: 'battery', urgency: 'urgent', status: 'received', photos: [] };
+    const rows = [
+      ['LN-BEFORE', '2026-11-09T17:59:59.999Z'],
+      ['LN-START', '2026-11-09T18:00:00.000Z'],
+      ['LN-END', '2026-11-10T17:59:59.999Z'],
+      ['LN-AFTER', '2026-11-10T18:00:00.000Z'],
+      ['LN-TYPE', '2026-11-10T00:00:00.000Z', { request_type: 'repair' }],
+      ['LN-NORMAL', '2026-11-10T00:00:00.000Z', { urgency: 'normal' }],
+      ['LN-DRAFT', '2026-11-10T00:00:00.000Z', { state: 'draft' }],
+    ];
+    await db.requests.insertMany(rows.map(([public_code, created, fields]) => ({
+      ...baseRow, ...fields, public_code, created_at: new Date(created),
+    })));
+    const query = '/admin/requests?type=battery&urgency=urgent&status=received&from=2026-11-10&to=2026-11-10';
+    const filtered = await owner.call(query);
+    assert.equal(filtered.status, 200);
+    assert.deepEqual(filtered.data.requests.map((row) => row.public_code), ['LN-END', 'LN-START']);
+    assert.equal(filtered.data.counts.received, 6);
+    const reference = await owner.call(query + '&code=ln-start');
+    assert.deepEqual(reference.data.requests.map((row) => row.public_code), ['LN-START']);
+    assert.equal((await owner.call('/admin/requests?from=2026-02-30')).status, 422);
+    assert.equal((await owner.call('/admin/requests?from=2026-11-11&to=2026-11-10')).status, 422);
+    assert.equal((await owner.call('/admin/requests?type=battery&type=repair')).status, 422);
+    assert.equal((await owner.call('/admin/requests?urgency=high')).status, 422);
+  });
   await t.test('failed login lockout, account reset revocation and logout', async () => {
     await locked.ready();
     for (let attempt = 0; attempt < 5; attempt += 1) {
