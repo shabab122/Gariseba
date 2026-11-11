@@ -27,19 +27,30 @@ export default function Assistant() {
     controller.current = request;
     setPending(message);
     setError('');
+    const deadline = window.setTimeout(() => {
+      if (request.signal.aborted) return;
+      request.abort();
+      controller.current = null;
+      setPending('');
+      setQuestion(message);
+      setError(t.chatTimeout);
+    }, 25000);
     try {
       const { analysis } = await api('/chat/analyze', {
         method: 'POST', signal: request.signal,
         body: { symptoms: message, language: lang, consent_ai: configured && permission, history: turns.slice(-4).map((turn) => turn.question) },
       });
+      if (request.signal.aborted) return;
+      if (!analysis?.summary || !analysis.next_step) throw new Error('Missing assistant guidance.');
       setTurns((current) => [...current, { question: message, analysis }]);
       setQuestion('');
     } catch (err) {
-      if (err.name !== 'AbortError') {
+      if (!request.signal.aborted) {
         setError(errorText(err));
         setQuestion(message);
       }
     } finally {
+      window.clearTimeout(deadline);
       if (controller.current === request) {
         setPending('');
         controller.current = null;
@@ -71,6 +82,9 @@ export default function Assistant() {
           </div>}
           {turns.map(({ question: item, analysis }, index) => <div className="chat-pair" key={index}>
             <div className="chat-turn user-turn">{item}</div>
+            <Link to="/request" state={{ symptoms: item }} className="text-link self-end text-sm">
+              {t.useInRequest}<ArrowUpRight size={14} />
+            </Link>
             <div className="chat-turn bot-turn bot-answer"><Sparkles size={18} /><Guidance analysis={analysis} /></div>
           </div>)}
           {pending && <><div className="chat-turn user-turn">{pending}</div><div className="chat-turn bot-turn"><Sparkles size={18} /><p>{t.chatWait}</p></div></>}

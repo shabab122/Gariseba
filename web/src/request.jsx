@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft, ArrowRight, ArrowUpRight, BatteryCharging, Camera, Check, ChevronRight, CircleCheck,
   Copy, ImagePlus, LifeBuoy, LocateFixed, Send, ShieldCheck, Trash2, Wrench,
@@ -9,9 +9,10 @@ import { useApp } from './context.jsx';
 import { Alert, Checkbox, Estimate, Field, Guidance, PageIntro, SafetyNotice, Status } from './ui.jsx';
 
 const serviceIcons = { battery: BatteryCharging, repair: Wrench, other: LifeBuoy };
-const initial = (type, language) => ({
+const initial = (type, language, symptoms) => ({
   request_type: Object.hasOwn(serviceIcons, type) ? type : 'repair',
-  symptoms: '', started_when: '', urgency: 'normal', safety_flag: false,
+  symptoms: typeof symptoms === 'string' ? symptoms.trim().slice(0, 1200) : '',
+  started_when: '', urgency: 'normal', safety_flag: false,
   customer_name: '', callback_phone: '', language, location_text: '', confirm_dhaka: false,
   map_lat: null, map_lng: null, vehicle_make: '', vehicle_model: '', vehicle_year: '', fuel_type: 'unknown',
   registration: '', maintenance_history: '', next_step: 'technician', consent_store: false, consent_whatsapp_share: false,
@@ -267,7 +268,8 @@ function Receipt({ receipt, reset }) {
 export default function RequestWizard() {
   const { t, lang, config, errorText, refresh } = useApp();
   const [params] = useSearchParams();
-  const [data, setData] = useState(() => initial(params.get('type'), lang));
+  const location = useLocation();
+  const [data, setData] = useState(() => initial(params.get('type'), lang, location.state?.symptoms));
   const [draftKey, setDraftKey] = useState(() => crypto.randomUUID());
   const [step, setStep] = useState(0);
   const [errors, setErrors] = useState({});

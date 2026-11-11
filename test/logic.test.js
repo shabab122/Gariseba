@@ -103,6 +103,25 @@ test('OpenAI adapter requires consent, redacts contact patterns and bypasses eme
   assert.equal(calls, 1);
 });
 
+test('OpenAI failures return built-in guidance and log a diagnostic code', async (t) => {
+  const warn = t.mock.method(console, 'warn', () => {});
+  const provider = { provider: 'openai', key: 'mock-key', model: 'mock-model' };
+  const cases = [
+    [Response.json({ error: 'mock-key' }, { status: 401 }), 'provider_http_401'],
+    [Response.json({ error: 'quota' }, { status: 429 }), 'provider_http_429'],
+    [Response.json({ status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' } }), 'provider_incomplete_max_output_tokens'],
+    [Response.json({ output: [] }), 'provider_empty_output'],
+    [Response.json({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'mock-key' }] }] }), 'provider_invalid_output'],
+  ];
+  for (const [response, code] of cases) {
+    const analyze = createAnalyzer({ provider, configured: true, fetcher: async () => response });
+    const result = await analyze({ symptoms: 'Flat tyre', language: 'en', consent_ai: true });
+    assert.equal(result.source, 'fallback');
+    assert.equal(result.provider_unavailable, true);
+    assert.deepEqual(warn.mock.calls.at(-1).arguments, ['[assistant] Provider request failed:', code]);
+  }
+});
+
 test('Anthropic adapter handles a valid response and falls back on rejected output', async () => {
   const model = { summary: 'There may be a tyre puncture.', next_step: 'Arrange assistance.', questions: [], safety: false };
   const provider = { provider: 'anthropic', key: 'mock-key', model: 'mock-model' };

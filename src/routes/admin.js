@@ -2,7 +2,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const { businessSettings } = require('../db');
-const { clean, CATEGORIES } = require('../lib/validate');
+const { clean, CATEGORIES, TYPES } = require('../lib/validate');
 const { STATUSES } = require('../lib/business');
 const { HttpError } = require('../lib/http');
 const { deleteRequest, submitted } = require('../lib/requests');
@@ -16,6 +16,15 @@ const invalid = (message) => new HttpError(422, 'validation', message);
 const conflict = () => new HttpError(409, 'conflict', 'The request changed. Refresh the details before saving again.');
 const denied = () => new HttpError(401, 'auth', 'Incorrect username or password.');
 const range = (value, low, high) => Number.isInteger(value) && value >= low && value <= high;
+
+function dhakaDayStart(value) {
+  if (value === undefined || value === '') return null;
+  const message = 'Enter valid dates in YYYY-MM-DD format.';
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) throw invalid(message);
+  const utcDate = new Date(value + 'T00:00:00Z');
+  if (!Number.isFinite(utcDate.getTime()) || utcDate.toISOString().slice(0, 10) !== value) throw invalid(message);
+  return new Date(value + 'T00:00:00+06:00');
+}
 
 async function registerFailure(db, user, now) {
   const nextCount = { $add: [{ $ifNull: ['$failedLogins', 0] }, 1] };
@@ -71,9 +80,23 @@ function adminRoutes(db, limits) {
     const code = clean(req.query.code, 20).toUpperCase();
     const pageValue = Number(req.query.page);
     const page = range(pageValue, 1, 500) ? pageValue : 1;
+    const { type = '', urgency = '' } = req.query;
+    if (type !== '' && !TYPES.includes(type)) throw invalid('Choose a valid request type.');
+    if (urgency !== '' && !['normal', 'urgent'].includes(urgency)) throw invalid('Choose a valid urgency.');
+    const from = dhakaDayStart(req.query.from);
+    const to = dhakaDayStart(req.query.to);
+    if (from && to && from > to) throw invalid('The start date must be on or before the end date.');
+
     const criteria = { ...submitted };
     if (status) criteria.status = status;
     if (code) criteria.public_code = code;
+    if (type) criteria.request_type = type;
+    if (urgency) criteria.urgency = urgency;
+    if (from || to) {
+      criteria.created_at = {};
+      if (from) criteria.created_at.$gte = from;
+      if (to) criteria.created_at.$lt = new Date(to.getTime() + 24 * 60 * 60 * 1000);
+    }
     const [rows, stats] = await Promise.all([
       db.requests.aggregate([
         { $match: criteria }, { $sort: { created_at: -1, _id: -1 } },
