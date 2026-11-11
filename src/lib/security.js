@@ -92,6 +92,7 @@ function makeLimits() {
   return {
     general: limiter(1, 220), submit: limiter(15, 15), upload: limiter(10, 30),
     chat: limiter(5, 30), lookup: limiter(15, 25), login: limiter(15, 12), admin: limiter(1, 160),
+    aiTest: limiter(1, 3),
   };
 }
 

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Plus, Save, Trash2 } from 'lucide-react';
 import { api } from './api.js';
+import { OpenAIConnection } from './admin-ai.jsx';
 import { Alert, Checkbox, Dialog, Field } from './ui.jsx';
 
 const categories = ['battery', 'tyre', 'brakes', 'engine', 'overheating', 'electrical', 'ac', 'fuel', 'other'];
@@ -150,6 +151,7 @@ export function AdminConfig() {
 
   return <>
     <div className="admin-heading"><div><p className="eyebrow">OPERATIONS / CONFIGURATION</p><h1>Service settings</h1><p className="muted">Manage coverage and the rules used to calculate estimates.</p></div></div>
+    <OpenAIConnection />
     {error && <Alert>{error} <button className="text-link" type="button" onClick={load}>Retry</button></Alert>}
     {data ? <section className="panel admin-config">
       <div className="admin-tabs" role="group" aria-label="Configuration sections">

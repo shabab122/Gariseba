@@ -6,6 +6,7 @@ const { clean, CATEGORIES, TYPES } = require('../lib/validate');
 const { STATUSES } = require('../lib/business');
 const { HttpError } = require('../lib/http');
 const { deleteRequest, submitted } = require('../lib/requests');
+const { testOpenAIConnection } = require('../lib/ai');
 const sec = require('../lib/security');
 
 const DUMMY_HASH = bcrypt.hashSync('not-a-real-gariseba-password', 12);
@@ -36,7 +37,7 @@ async function registerFailure(db, user, now) {
   } }]);
 }
 
-function adminRoutes(db, limits) {
+function adminRoutes(db, limits, testConnection = testOpenAIConnection) {
   const router = express.Router();
   const role = (name) => sec.requireAdmin(db, name);
   router.post('/login', limits.login, async (req, res) => {
@@ -74,6 +75,17 @@ function adminRoutes(db, limits) {
 
   router.use(limits.admin, role('viewer'));
   router.get('/me', (req, res) => res.json({ user: req.admin }));
+
+  router.get('/queue-updates', async (req, res) => {
+    const totalReceived = await db.audit.countDocuments({ event: 'request_created' });
+    res.json({ totalReceived });
+  });
+
+  router.post('/ai/test', role('owner'), limits.aiTest, async (req, res) => {
+    const result = await testConnection();
+    await sec.audit(db, req, req.admin.username, 'ai_connection_tested', result.code);
+    res.json(result);
+  });
 
   router.get('/requests', async (req, res) => {
     const status = STATUSES.includes(req.query.status) ? req.query.status : null;

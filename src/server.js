@@ -11,7 +11,7 @@ const { adminRoutes } = require('./routes/admin');
 const { HttpError } = require('./lib/http');
 const sec = require('./lib/security');
 
-function createApp(db, { analyzer } = {}) {
+function createApp(db, { analyzer, aiConnectionTest } = {}) {
   const app = express();
   const limits = sec.makeLimits();
   const dist = path.join(config.root, 'dist');
@@ -46,7 +46,7 @@ function createApp(db, { analyzer } = {}) {
     next();
   }, limits.general, express.json({ limit: '50kb' }), sec.sessionMiddleware(db), sec.csrfProtect);
   app.use('/api', publicRoutes(db, limits, analyzer));
-  app.use('/api/admin', adminRoutes(db, limits));
+  app.use('/api/admin', adminRoutes(db, limits, aiConnectionTest));
   app.use('/api', (req, res) => res.status(404).json({ error: 'not_found', message: 'This endpoint does not exist.' }));
 
   app.get('/admin.html', (req, res) => res.redirect(301, '/admin'));

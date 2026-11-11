@@ -263,6 +263,67 @@ test('customer and staff workflows on a real MongoDB', { timeout: 45000 }, async
   });
 });
 
+test('queue alerts count new submissions and OpenAI tests enforce owner access and limits', { timeout: 25000 }, async (t) => {
+  const db = await testDatabase(t);
+  await ensureDefaults(db);
+  const passwordHash = await bcrypt.hash(password, 4);
+  await db.adminUsers.insertMany(['owner', 'viewer', 'dispatcher'].map((role) => ({
+    _id: role, role, authVersion: 1, passwordHash, failedLogins: 0, lockedUntil: null,
+  })));
+  let connectionCalls = 0;
+  const server = createApp(db, { aiConnectionTest: async () => {
+    connectionCalls++;
+    return {
+      ok: connectionCalls !== 2, code: connectionCalls === 2 ? 'provider_http_429' : 'connected',
+      message: connectionCalls === 2 ? 'Check API credits and rate limits.' : 'Connected.',
+      checkedAt: new Date().toISOString(),
+    };
+  } }).listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const base = 'http://127.0.0.1:' + server.address().port;
+  const customer = client(base), owner = client(base), viewer = client(base), dispatcher = client(base);
+  for (const browser of [customer, owner, viewer, dispatcher]) await browser.ready();
+  assert.equal((await customer.call('/admin/queue-updates')).status, 401);
+  assert.equal((await customer.post('/admin/ai/test')).status, 401);
+  for (const [username, browser] of [['owner', owner], ['viewer', viewer], ['dispatcher', dispatcher]]) {
+    assert.equal((await browser.post('/admin/login', { username, password })).status, 200);
+  }
+  assert.equal((await owner.call('/admin/queue-updates')).data.totalReceived, 0);
+  const draft = randomUUID();
+  const created = await customer.post('/requests', input, { draft });
+  assert.equal(created.status, 201);
+  assert.equal((await viewer.call('/admin/queue-updates')).data.totalReceived, 1);
+  assert.equal((await customer.post('/requests', input, { draft })).status, 200);
+  assert.equal((await dispatcher.call('/admin/queue-updates')).data.totalReceived, 1);
+  const row = await db.requests.findOne({ public_code: created.data.code });
+  assert.equal((await dispatcher.call('/admin/requests/' + row._id, {
+    method: 'PATCH', body: { version: row.version, status: 'confirmed' },
+  })).status, 200);
+  assert.equal((await owner.call('/admin/queue-updates')).data.totalReceived, 1);
+  assert.equal((await owner.call('/admin/requests/' + row._id, { method: 'DELETE' })).status, 200);
+  assert.equal((await owner.call('/admin/queue-updates')).data.totalReceived, 1);
+  assert.equal((await customer.post('/requests', input, { draft: randomUUID() })).status, 201);
+  assert.equal((await owner.call('/admin/queue-updates')).data.totalReceived, 2);
+
+  assert.equal((await viewer.post('/admin/ai/test')).status, 403);
+  assert.equal((await dispatcher.post('/admin/ai/test')).status, 403);
+  assert.equal((await owner.post('/admin/ai/test', {}, { noCsrf: true })).status, 403);
+  assert.equal(connectionCalls, 0);
+  const success = await owner.post('/admin/ai/test', { symptoms: 'Ignored custom input' });
+  assert.equal(success.status, 200);
+  assert.equal(success.data.ok, true);
+  const failed = await owner.post('/admin/ai/test');
+  assert.equal(failed.status, 200);
+  assert.equal(failed.data.code, 'provider_http_429');
+  assert.equal((await owner.post('/admin/ai/test')).status, 200);
+  assert.equal((await owner.post('/admin/ai/test')).status, 429);
+  assert.equal(connectionCalls, 3);
+  const events = await db.audit.find({ event: 'ai_connection_tested' }).toArray();
+  assert.equal(events.length, 3);
+  assert.deepEqual(events.map((event) => event.target), ['connected', 'provider_http_429', 'connected']);
+});
+
 test('legacy SQLite import preserves tracking, roles, history, and private photos', { timeout: 25000 }, async (t) => {
   const db = await testDatabase(t);
   const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'gariseba-import-test-'));

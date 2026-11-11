@@ -1,8 +1,8 @@
-# GariSeba 2.1
+# GariSeba 2.2
 
 GariSeba is a bilingual roadside request and vehicle guidance app for Dhaka. The project originated as LAGBO NAKI?. It uses React, HTML, CSS and Tailwind on the frontend, Node.js and Express for the API, and MongoDB for data. The Word guide in `docs/` covers the original GariSeba setup in Bangla.
 
-## Upgrade from 2.0 on Linux
+## Upgrade from 2.1 on Linux
 
 Stop the old Node server, extract the new archive in a separate directory, and copy your existing `.env` into the new `gariseba-mern` folder. Keep its MongoDB URI, database name and secrets so your accounts, requests and tracking keys carry over. Use the same running MongoDB instance. If you configured Compose for MongoDB 7.0, use your working `compose.yaml` and volume when starting MongoDB again.
 
@@ -14,7 +14,25 @@ npm run build
 npm start
 ```
 
-Open the address shown in the terminal. If you previously used port 3001, keep `PORT=3001` and `PUBLIC_BASE_URL=http://localhost:3001` in `.env` and open [http://localhost:3001](http://localhost:3001).
+Open the address shown in the terminal. For an existing port 3030 setup, keep `PORT=3030` and `PUBLIC_BASE_URL=http://localhost:3030` in `.env` and open [http://localhost:3030](http://localhost:3030).
+
+## Version 2.2 features
+
+| Feature | How to use it |
+| --- | --- |
+| Remember staff queue filters and page | Apply filters in the staff queue. The URL keeps status, type, urgency, received dates, reference and page. Opening a request, returning to the queue, reloading or using browser Back restores the applied view. |
+| New-request alerts | Keep the staff portal open. A check runs every 30 seconds while the tab is visible and when you return to it. The notice counts arrivals since opening the portal or the last successful queue refresh. Use **Refresh queue** to review them with your current filters. |
+| Owner OpenAI connection test | Sign in as an owner, open **Service settings**, then choose **Test OpenAI connection**. The server sends a fixed vehicle question through the same model adapter and response validation used by the assistant. |
+
+The alerts use the existing `request_created` audit events. A submission retry, status edit or deletion keeps the arrival count consistent. Alerts operate across the staff queue, request details and settings. A temporary check failure keeps the current notice and retries on the next check. Refreshing the whole staff portal starts a new alert baseline.
+
+The OpenAI test uses the server's current `AI_PROVIDER`, `AI_API_KEY` and `AI_MODEL` configuration. Restart after editing the environment. The result shows a checked time and a safe diagnostic code. Tests are limited to three per minute per IP and can incur OpenAI API charges. The check sends a fixed test question and returns a validated connection result. Your local API key is needed to verify a live connection.
+
+### Check the three features
+
+1. Apply a type and urgency filter, move to another queue page if available, open a request and return. Reload the page and confirm the same filters and page are selected.
+2. Keep a staff tab open and submit a new request from a customer tab. Return to the staff tab and check the arrival notice. Refresh the queue to review it. Try a filter that excludes the new request and confirm the filter is still applied.
+3. Sign in as an owner and test OpenAI from Service settings. Confirm that the result shows either a validated response or a clear diagnostic such as `provider_http_401`, `provider_http_429` or `not_configured`.
 
 ## Run locally on Windows
 
