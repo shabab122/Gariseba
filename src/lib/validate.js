@@ -18,6 +18,16 @@ const FUELS = ['petrol', 'diesel', 'octane', 'cng', 'lpg', 'hybrid', 'electric',
 const LABELS = ['vehicle', 'dashboard', 'damage', 'battery', 'other'];
 const CATEGORIES = ['battery', 'tyre', 'brakes', 'engine', 'overheating', 'electrical', 'ac', 'fuel', 'other'];
 
+function normalizeEmail(value) {
+  if (typeof value !== 'string') return null;
+  const email = value.trim();
+  if (email.length > 254 || !/^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$/.test(email)) return null;
+  const at = email.lastIndexOf('@');
+  const local = email.slice(0, at);
+  if (local.startsWith('.') || local.endsWith('.') || local.includes('..')) return null;
+  return local + '@' + email.slice(at + 1).toLowerCase();
+}
+
 function validateRequest(body) {
   const errors = {};
   const out = {};
@@ -76,8 +86,11 @@ function validateRequest(body) {
     errors.photo_ids = 'Check the selected photos.';
   }
   out.photo_ids = errors.photo_ids ? [] : [...new Set(ids)];
+  out.consent_status_email = b.consent_status_email === true;
+  out.notification_email = out.consent_status_email ? normalizeEmail(b.notification_email) : null;
+  if (out.consent_status_email && !out.notification_email) errors.notification_email = 'Enter a valid email address for status updates.';
 
   return { ok: Object.keys(errors).length === 0, errors, value: out };
 }
 
-module.exports = { clean, digits, normalizePhone, validateRequest, TYPES, FUELS, LABELS, CATEGORIES };
+module.exports = { clean, digits, normalizePhone, normalizeEmail, validateRequest, TYPES, FUELS, LABELS, CATEGORIES };

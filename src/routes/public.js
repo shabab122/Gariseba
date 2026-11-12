@@ -9,6 +9,7 @@ const { buildMessage, clickToChatUrl } = require('../lib/whatsapp');
 const { processPhoto } = require('../lib/images');
 const { HttpError } = require('../lib/http');
 const { deleteRequest, draftMs, draftRef, ensureDraft, findTracked, submitted, trackView } = require('../lib/requests');
+const { emailReady } = require('../lib/notifications');
 const sec = require('../lib/security');
 
 const { photosPerRequest, photoMaxBytes } = config.limits;
@@ -29,7 +30,7 @@ function receipt(row, token) {
   };
 }
 
-function publicRoutes(db, limits, analyze = createAnalyzer()) {
+function publicRoutes(db, limits, analyze = createAnalyzer(), email = config.email) {
   const router = express.Router();
   router.get('/bootstrap', async (req, res) => {
     const csrf = sec.ensureSession(req);
@@ -37,7 +38,7 @@ function publicRoutes(db, limits, analyze = createAnalyzer()) {
       csrf,
       business: { name: 'GariSeba', whatsappNumber: '+' + config.whatsappNumber, serviceArea: 'Dhaka' },
       ...(await pricingInfo(db)),
-      integrations: { ai: config.aiConfigured ? 'configured' : 'fallback', malwareScan: Boolean(config.clam.host) },
+      integrations: { ai: config.aiConfigured ? 'configured' : 'fallback', malwareScan: Boolean(config.clam.host), statusEmail: emailReady(email) },
       limits: { photoMaxMB: photoMaxBytes / (1024 * 1024), photosPerRequest },
     });
   });
@@ -111,10 +112,14 @@ function publicRoutes(db, limits, analyze = createAnalyzer()) {
   router.post('/requests', limits.submit, async (req, res) => {
     const { ok, errors, value } = validateRequest(req.body);
     if (!ok) throw new HttpError(422, 'validation', 'Check the request details.', { errors });
+    if (value.consent_status_email && !emailReady(email)) {
+      throw new HttpError(422, 'validation', 'Email updates are currently unavailable.', { errors: { notification_email: 'Email updates are currently unavailable.' } });
+    }
     const id = draftRef(req);
     const token = sec.trackingToken(id);
     const confirm = req.body.confirm_dhaka === true;
-    const fingerprint = sec.sha256(JSON.stringify([value, confirm]));
+    const { consent_status_email, notification_email, ...legacyValue } = value;
+    const fingerprint = sec.sha256(JSON.stringify([consent_status_email ? value : legacyValue, confirm]));
     const replay = (row) => {
       if (row.fingerprint !== fingerprint || row.tracking_token_hash !== sec.sha256(token)) {
         throw new HttpError(409, 'already_submitted', 'This draft already has a submitted request. Retry with the original details.');
@@ -144,6 +149,7 @@ function publicRoutes(db, limits, analyze = createAnalyzer()) {
       tracking_token_hash: sec.sha256(token), fingerprint, photos, analysis, estimate,
       safety_flag: analysis.safety, consent_at: now, created_at: now, updated_at: now, version: 1,
       history: [{ status: 'received', actor: 'customer', created_at: now }], corrections: [], correction_requested: false,
+      ...(value.consent_status_email ? { email_outbox: [] } : {}),
     };
     const condition = { _id: id, state: 'draft', expiresAt: { $gt: now } };
     if (photo_ids.length) condition['photos.upload_id'] = { $all: photo_ids };
@@ -181,6 +187,17 @@ function publicRoutes(db, limits, analyze = createAnalyzer()) {
     if (req.body.action === 'delete') {
       if (!await deleteRequest(db, row._id)) throw missingTrack();
       await sec.audit(db, req, 'customer', 'request_deleted_by_customer', row.public_code);
+      return res.json({ ok: true });
+    }
+    if (req.body.action === 'stop_email') {
+      if (!row.consent_status_email) return res.json({ ok: true });
+      const result = await db.requests.updateOne({ _id: row._id, ...submitted }, {
+        $set: { consent_status_email: false, 'email_outbox.$[waiting].state': 'cancelled' },
+        $unset: { notification_lock_token: '', notification_lock_until: '' },
+        $inc: { version: 1 },
+      }, { arrayFilters: [{ 'waiting.state': { $in: ['pending', 'sending'] } }] });
+      if (!result.matchedCount) throw missingTrack();
+      await sec.audit(db, req, 'customer', 'status_email_stopped', row.public_code);
       return res.json({ ok: true });
     }
     if (req.body.action !== 'correct') throw new HttpError(400, 'bad_action', 'Choose an action.');

@@ -7,25 +7,23 @@ const { STATUSES } = require('../lib/business');
 const { HttpError } = require('../lib/http');
 const { deleteRequest, submitted } = require('../lib/requests');
 const { testOpenAIConnection } = require('../lib/ai');
+const config = require('../config');
+const { dhakaDayStart } = require('../lib/request-dates');
+const { statusEmail, emailReady } = require('../lib/notifications');
+const { operationRoutes } = require('./operations');
 const sec = require('../lib/security');
 
 const DUMMY_HASH = bcrypt.hashSync('not-a-real-gariseba-password', 12);
 const pageSize = 20;
-const staffProjection = { tracking_token_hash: 0, fingerprint: 0, 'photos.content': 0 };
+const staffProjection = {
+  tracking_token_hash: 0, fingerprint: 0, 'photos.content': 0,
+  'email_outbox.payload': 0, 'email_outbox.claim_token': 0, notification_lock_token: 0,
+};
 const missing = () => new HttpError(404, 'not_found', 'The record could not be found.');
 const invalid = (message) => new HttpError(422, 'validation', message);
 const conflict = () => new HttpError(409, 'conflict', 'The request changed. Refresh the details before saving again.');
 const denied = () => new HttpError(401, 'auth', 'Incorrect username or password.');
 const range = (value, low, high) => Number.isInteger(value) && value >= low && value <= high;
-
-function dhakaDayStart(value) {
-  if (value === undefined || value === '') return null;
-  const message = 'Enter valid dates in YYYY-MM-DD format.';
-  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) throw invalid(message);
-  const utcDate = new Date(value + 'T00:00:00Z');
-  if (!Number.isFinite(utcDate.getTime()) || utcDate.toISOString().slice(0, 10) !== value) throw invalid(message);
-  return new Date(value + 'T00:00:00+06:00');
-}
 
 async function registerFailure(db, user, now) {
   const nextCount = { $add: [{ $ifNull: ['$failedLogins', 0] }, 1] };
@@ -37,7 +35,7 @@ async function registerFailure(db, user, now) {
   } }]);
 }
 
-function adminRoutes(db, limits, testConnection = testOpenAIConnection) {
+function adminRoutes(db, limits, testConnection = testOpenAIConnection, email = config.email) {
   const router = express.Router();
   const role = (name) => sec.requireAdmin(db, name);
   router.post('/login', limits.login, async (req, res) => {
@@ -75,6 +73,7 @@ function adminRoutes(db, limits, testConnection = testOpenAIConnection) {
 
   router.use(limits.admin, role('viewer'));
   router.get('/me', (req, res) => res.json({ user: req.admin }));
+  router.use(operationRoutes(db));
 
   router.get('/queue-updates', async (req, res) => {
     const totalReceived = await db.audit.countDocuments({ event: 'request_created' });
@@ -117,6 +116,7 @@ function adminRoutes(db, limits, testConnection = testOpenAIConnection) {
           public_code: 1, request_type: 1, urgency: 1, status: 1, customer_name: 1,
           location_text: 1, vehicle_make: 1, vehicle_model: 1, safety_flag: 1,
           correction_requested: 1, created_at: 1, photo_count: { $size: '$photos' },
+          technician: 1,
         } },
       ]).toArray(),
       db.requests.aggregate([
@@ -138,7 +138,7 @@ function adminRoutes(db, limits, testConnection = testOpenAIConnection) {
 
   router.patch('/requests/:id', role('dispatcher'), async (req, res) => {
     const row = await db.requests.findOne({ _id: req.params.id, ...submitted }, {
-      projection: { public_code: 1, status: 1, version: 1 },
+      projection: { public_code: 1, status: 1, version: 1, technician: 1, language: 1, consent_status_email: 1, notification_email: 1 },
     });
     if (!row) throw missing();
     const body = req.body || {};
@@ -147,6 +147,16 @@ function adminRoutes(db, limits, testConnection = testOpenAIConnection) {
     if (body.status !== undefined) {
       if (!STATUSES.includes(body.status)) throw invalid('Choose a valid status.');
       fields.status = body.status;
+    }
+    if (body.technician_id !== undefined && body.technician_id !== (row.technician?.id || '')) {
+      if (body.technician_id === '' || body.technician_id === null) {
+        fields.technician = null;
+      } else {
+        if (typeof body.technician_id !== 'string') throw invalid('Choose a valid technician.');
+        const technician = await db.technicians.findOne({ _id: body.technician_id, active: true });
+        if (!technician) throw invalid('Choose an active technician or refresh the technician list.');
+        fields.technician = { id: technician._id, name: technician.name };
+      }
     }
     for (const key of ['technician_notes', 'final_bill_note']) {
       if (body[key] !== undefined) {
@@ -160,9 +170,13 @@ function adminRoutes(db, limits, testConnection = testOpenAIConnection) {
     const change = { $set: { ...fields, updated_at: now }, $inc: { version: 1 } };
     const statusChanged = fields.status && fields.status !== row.status;
     if (statusChanged) change.$push = { history: { status: fields.status, actor: req.admin.username, created_at: now } };
+    if (statusChanged && row.consent_status_email && emailReady(email)) {
+      change.$push.email_outbox = statusEmail(row, fields.status, email, now);
+    }
     const result = await db.requests.updateOne({ _id: row._id, ...submitted, version: row.version }, change);
     if (!result.matchedCount) throw conflict();
     await sec.audit(db, req, req.admin.username, statusChanged ? 'status_change' : 'request_updated', row.public_code);
+    if (Object.hasOwn(fields, 'technician')) await sec.audit(db, req, req.admin.username, 'technician_assigned', row.public_code);
     res.json({ ok: true });
   });
 

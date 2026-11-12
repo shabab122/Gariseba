@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { ArrowRight, Clock3, KeyRound, LockKeyhole, NotebookPen, Search, Trash2 } from 'lucide-react';
+import { ArrowRight, BellOff, Clock3, KeyRound, LockKeyhole, NotebookPen, Search, Trash2 } from 'lucide-react';
 import { api } from './api.js';
 import { useApp } from './context.jsx';
 import { Alert, dateTime, Dialog, Field, PageIntro, Status } from './ui.jsx';
@@ -104,7 +104,8 @@ export default function Track() {
         setCode('');
         setToken('');
       }
-      setNotice(dialog === 'delete' ? t.deleted : t.correctSent);
+      if (dialog === 'stop_email') setData((current) => ({ ...current, emailUpdates: false }));
+      setNotice({ delete: t.deleted, correct: t.correctSent, stop_email: t.emailStopped }[dialog]);
       setDialog('');
     } catch (err) { setDialogError(errorText(err)); }
     finally { setBusy(''); }
@@ -143,19 +144,20 @@ export default function Track() {
         <h3><LockKeyhole size={17} />{t.manage}</h3>
         <div className="flex flex-wrap gap-2">
           <button type="button" className="btn btn-outline" onClick={() => open('correct')}><NotebookPen size={17} />{t.correct}</button>
+          {data.emailUpdates && <button type="button" className="btn btn-outline" onClick={() => open('stop_email')}><BellOff size={17} />{t.stopEmail}</button>}
           <button type="button" className="btn btn-danger-outline" onClick={() => open('delete')}><Trash2 size={17} />{t.delete}</button>
         </div>
       </div>
     </section>}
     <Link to="/request" className="text-link mt-6">{t.request}<ArrowRight size={16} /></Link>
-    {dialog && <Dialog title={dialog === 'delete' ? t.deleteTitle : t.correct} description={dialog === 'delete' ? t.deleteBody : null} onClose={() => !busy && setDialog('')}>
+    {dialog && <Dialog title={{ delete: t.deleteTitle, correct: t.correct, stop_email: t.stopEmailTitle }[dialog]} description={{ delete: t.deleteBody, stop_email: t.stopEmailBody }[dialog]} onClose={() => !busy && setDialog('')}>
       <form className="dialog-form" onSubmit={change}>
         {dialog === 'correct' && <Field id="correction-note" label={t.correction}><textarea id="correction-note" value={note} onChange={(event) => setNote(event.target.value)} maxLength={600} rows={4} required /></Field>}
         {dialogError && <Alert>{dialogError}</Alert>}
         <div className="flex flex-wrap justify-end gap-2">
           <button className="btn btn-outline" type="button" onClick={() => setDialog('')} disabled={Boolean(busy)}>{t.cancel}</button>
           <button className={`btn ${dialog === 'delete' ? 'btn-danger' : 'btn-primary'}`} type="submit" disabled={Boolean(busy) || (dialog === 'correct' && note.trim().length < 3)}>
-            {busy ? t.sending : dialog === 'delete' ? t.confirmDelete : t.correct}
+            {busy ? t.sending : { delete: t.confirmDelete, correct: t.correct, stop_email: t.stopEmail }[dialog]}
           </button>
         </div>
       </form>

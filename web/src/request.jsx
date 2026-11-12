@@ -16,9 +16,10 @@ const initial = (type, language, symptoms) => ({
   customer_name: '', callback_phone: '', language, location_text: '', confirm_dhaka: false,
   map_lat: null, map_lng: null, vehicle_make: '', vehicle_model: '', vehicle_year: '', fuel_type: 'unknown',
   registration: '', maintenance_history: '', next_step: 'technician', consent_store: false, consent_whatsapp_share: false,
+  notification_email: '', consent_status_email: false,
 });
 const fieldSteps = [
-  ['request_type', 'symptoms', 'started_when'], ['customer_name', 'callback_phone', 'location_text', 'map_lat'],
+  ['request_type', 'symptoms', 'started_when'], ['customer_name', 'callback_phone', 'notification_email', 'location_text', 'map_lat'],
   ['vehicle_make', 'vehicle_model', 'vehicle_year'], ['photo_ids'], ['consent_store'],
 ];
 const digits = (text) => text.replace(/[০-৯]/g, (digit) => String(digit.charCodeAt(0) - 0x09e6));
@@ -30,6 +31,7 @@ function validateStep(step, data, t) {
     if (data.customer_name.trim().length < 2) errors.customer_name = t.required;
     if (!/^(?:\+?880|0)1[3-9]\d{8}$/.test(digits(data.callback_phone).replace(/[\s()-]/g, ''))) errors.callback_phone = t.phoneHint;
     if (data.location_text.trim().length < 3) errors.location_text = t.required;
+    if (data.consent_status_email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.notification_email.trim())) errors.notification_email = t.emailInvalid;
   }
   if (step === 2) {
     for (const key of ['vehicle_make', 'vehicle_model']) if (!data[key].trim()) errors[key] = t.required;
@@ -203,6 +205,7 @@ function Review({ data, photos, go, set, errors }) {
   const groups = [
     [t.problem, [t.requestTypes[data.request_type], data.symptoms, data.started_when, data.urgency === 'urgent' ? t.urgent : t.normal], 0],
     [t.contact, [data.customer_name, data.callback_phone, data.location_text, data.language === 'bn' ? 'বাংলা' : 'English',
+      data.consent_status_email && t.emailUpdates + ' · ' + data.notification_email,
       hasMap && <a key="map" href={`https://maps.google.com/?q=${data.map_lat},${data.map_lng}`} target="_blank" rel="noreferrer" className="text-link">{t.pinAdded}</a>], 1],
     [t.vehicle, [vehicle, data.registration, data.maintenance_history], 2],
     [t.attach, [photos.length ? photos.map((photo) => t.photoLabels[photo.label]).join(', ') : t.none], 3],
@@ -429,6 +432,10 @@ export default function RequestWizard() {
           <Field id="preferred-language" label={t.languageForStaff}><select id="preferred-language" value={data.language} onChange={(event) => set('language', event.target.value)}>
             <option value="en">English</option><option value="bn">বাংলা</option>
           </select></Field>
+          {config?.integrations.statusEmail ? <>
+            <Checkbox checked={data.consent_status_email} onChange={(event) => set('consent_status_email', event.target.checked)}>{t.emailConsent}</Checkbox>
+            {data.consent_status_email && <TextField {...problemFields} name="notification_email" label={t.emailAddress} hint={t.emailHint} maxLength={254} type="email" autoComplete="email" required />}
+          </> : <p className="muted text-sm">{t.emailUnavailable}</p>}
           <TextField {...problemFields} name="location_text" label={t.where} hint={t.whereHint} maxLength={300} multiline rows={3} disabled={busy === 'area'} required />
           <div className="flex flex-wrap items-center gap-3">
             <button type="button" className="btn btn-outline" onClick={requestCheck} disabled={locked}>{busy === 'area' ? t.checking : t.areaCheck}</button>

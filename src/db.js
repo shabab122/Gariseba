@@ -11,7 +11,7 @@ async function connectDatabase({ uri = config.mongoUri, dbName = config.mongoDb 
     await client.connect();
     const db = client.db(dbName);
     const collections = Object.fromEntries(
-      ['requests', 'sessions', 'adminUsers', 'settings', 'areas', 'pricing', 'audit']
+      ['requests', 'sessions', 'adminUsers', 'settings', 'areas', 'pricing', 'audit', 'technicians']
         .map((name) => [name, db.collection(name)])
     );
     await Promise.all([
@@ -21,11 +21,13 @@ async function connectDatabase({ uri = config.mongoUri, dbName = config.mongoDb 
         { key: { state: 1, status: 1, created_at: -1 } },
         { key: { state: 1, 'photos.upload_id': 1 } },
         { key: { expiresAt: 1 }, expireAfterSeconds: 0 },
+        { key: { state: 1, consent_status_email: 1, 'email_outbox.state': 1, 'email_outbox.next_attempt_at': 1 } },
       ]),
       collections.sessions.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
       collections.pricing.createIndex({ category: 1, active: 1, min_bdt: 1 }),
       collections.audit.createIndex({ at: -1 }),
       collections.audit.createIndex({ event: 1 }),
+      collections.technicians.createIndex({ active: 1, name: 1 }),
     ]);
     return { client, db, ...collections };
   } catch (error) {
