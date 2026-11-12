@@ -2,6 +2,7 @@
 const { loadEnvFile } = require('node:process');
 const { randomBytes } = require('node:crypto');
 const path = require('node:path');
+const { normalizeEmail } = require('./lib/validate');
 
 const root = path.join(__dirname, '..');
 try { loadEnvFile(path.join(root, '.env')); }
@@ -33,9 +34,13 @@ const ai = {
   model: (process.env.AI_MODEL || '').trim(),
 };
 const aiConfigured = ['openai', 'anthropic'].includes(ai.provider) && !!ai.key && !!ai.model;
+const email = {
+  key: (process.env.RESEND_API_KEY || '').trim(),
+  from: normalizeEmail(process.env.NOTIFICATION_FROM) || '',
+};
 
 module.exports = {
-  root, isProd, port, publicUrl, whatsappNumber, ai, aiConfigured,
+  root, isProd, port, publicUrl, whatsappNumber, ai, aiConfigured, email,
   host: process.env.HOST || '127.0.0.1',
   mongoUri: process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017',
   mongoDb: process.env.MONGODB_DB || 'gariseba',

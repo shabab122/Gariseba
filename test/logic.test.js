@@ -1,11 +1,13 @@
 'use strict';
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
-const { validateRequest, normalizePhone } = require('../src/lib/validate');
+const { validateRequest, normalizePhone, normalizeEmail } = require('../src/lib/validate');
 const { createAnalyzer, fallbackAnalyze, validateOutput, testOpenAIConnection } = require('../src/lib/ai');
 const { matchArea, estimateFor } = require('../src/lib/business');
 const { sniff } = require('../src/lib/images');
 const { buildMessage } = require('../src/lib/whatsapp');
+const { reportCsv } = require('../src/lib/reports');
+const { statusEmail, emailReady } = require('../src/lib/notifications');
 
 const input = {
   request_type: 'repair', customer_name: 'Sample Driver', callback_phone: '01700000000',
@@ -18,6 +20,36 @@ test('phone validation supports Bengali digits and local / international formats
   assert.equal(normalizePhone('+880 (17) 0000-0000'), '+8801700000000');
   assert.equal(normalizePhone({ $ne: null }), null);
   assert.equal(normalizePhone('01200000000'), null);
+});
+
+test('email updates require consent and validate addresses without retaining opted-out input', () => {
+  assert.equal(normalizeEmail(' Test+status@EXAMPLE.COM '), 'Test+status@example.com');
+  assert.equal(normalizeEmail('a@example.com\r\nBcc:other@example.com'), null);
+  assert.equal(normalizeEmail({ $ne: null }), null);
+  assert.equal(normalizeEmail('a..b@example.com'), null);
+  assert.equal(normalizeEmail('.driver@example.com'), null);
+  assert.equal(validateRequest({ ...input, consent_status_email: true, notification_email: 'not-email' }).ok, false);
+  assert.equal(validateRequest({ ...input, notification_email: 'private@example.com' }).value.notification_email, null);
+  assert.equal(validateRequest({ ...input, consent_status_email: true, notification_email: 'driver@example.com' }).value.notification_email, 'driver@example.com');
+  assert.equal(emailReady({ key: 'synthetic', from: 'updates@example.com' }), true);
+  assert.equal(emailReady({ key: 'synthetic', from: 'invalid' }), false);
+  const job = statusEmail({ public_code: 'LN-ABC234', language: 'bn', notification_email: 'driver@example.com' }, 'confirmed', { from: 'updates@example.com' });
+  assert.equal(job.state, 'pending');
+  assert.match(job.payload.text, /LN-ABC234/);
+  assert.match(job.payload.subject, /GariSeba/);
+  assert.equal(job.expires_at - job.created_at, 23 * 60 * 60 * 1000);
+});
+
+test('report CSV quotes data and neutralizes spreadsheet formulas', () => {
+  const csv = reportCsv({ rows: [
+    { date: '2026-11-10', type: '=HYPERLINK("https://invalid")', status: ' received, "checked"', count: 2 },
+    { date: '2026-11-11', type: 'repair', status: '\t@unsafe', count: 1 },
+  ] });
+  assert.ok(csv.startsWith('\uFEFF"Date (Dhaka)"'));
+  assert.match(csv, /'=HYPERLINK\(""https:\/\/invalid""\)/);
+  assert.match(csv, /'\t@unsafe/);
+  assert.match(csv, /" received, ""checked"""/);
+  assert.ok(csv.endsWith('\r\n'));
 });
 
 test('request validation requires explicit consent and accepts a Bengali year', () => {

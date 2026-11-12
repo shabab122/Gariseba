@@ -432,7 +432,7 @@ textarea { resize: vertical; }
   .admin-shell { grid-template-columns: 1fr; }
   .admin-sidebar { padding: 10px 12px; gap: 5px; }
   .admin-sidebar .brand { margin-bottom: 1px; }
-  .admin-sidebar nav { grid-auto-flow: column; justify-content: start; gap: 2px; }
+  .admin-sidebar nav { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 2px; }
   .admin-sidebar nav button, .admin-public { padding: 6px; font-size: .79rem; }
   .admin-sidebar nav button svg { width: 15px; }
   .admin-public { margin: 0; }

@@ -2,10 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   ArrowDownLeft, ArrowLeft, ArrowRight, ArrowUpRight, ClipboardList, Gauge, History, LockKeyhole,
-  Bell, LogOut, RefreshCw, Search, Settings2, ShieldCheck, Trash2, TriangleAlert,
+  Bell, ChartColumn, LogOut, RefreshCw, Search, Settings2, ShieldCheck, Trash2, TriangleAlert, Users,
 } from 'lucide-react';
 import { api, updateCsrf } from './api.js';
 import { AdminConfig, useMutation } from './admin-config.jsx';
+import { Technicians } from './admin-technicians.jsx';
+import { Reports } from './admin-reports.jsx';
+import { RequestEmails } from './admin-emails.jsx';
 import { ThemeButton } from './layout.jsx';
 import { Alert, Brand, Checkbox, dateTime, Dialog, Field, Status } from './ui.jsx';
 
@@ -195,7 +198,9 @@ function Queue({ open, refreshVersion, onLoaded }) {
               {row.safety_flag && <span className="table-warning"><TriangleAlert size={13} />Safety flag</span>}
               {row.correction_requested && <span className="table-warning">Correction requested</span>}
             </td>
-            <td><strong>{row.customer_name}</strong><small>{row.vehicle_make} {row.vehicle_model} · {row.request_type}</small></td>
+            <td><strong>{row.customer_name}</strong><small>{row.vehicle_make} {row.vehicle_model} · {row.request_type}</small>
+              <small>{row.technician ? 'Assigned · ' + row.technician.name : 'Unassigned'}</small>
+            </td>
             <td>{row.location_text}</td><td><Status value={row.status} english /></td><td>{dateTime(row.created_at)}</td>
           </tr>)}</tbody>
         </table>
@@ -215,6 +220,18 @@ function UpdateRequest({ row, role, refresh, back }) {
   const [bill, setBill] = useState(row.final_bill_note || '');
   const [resolve, setResolve] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const [technicianId, setTechnicianId] = useState(row.technician?.id || '');
+  const [technicians, setTechnicians] = useState(null);
+  const [technicianError, setTechnicianError] = useState('');
+  const [technicianReload, setTechnicianReload] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    setTechnicianError('');
+    api('/admin/technicians', { signal: controller.signal })
+      .then((result) => { if (!controller.signal.aborted) setTechnicians(result.technicians); })
+      .catch((err) => { if (!controller.signal.aborted) setTechnicianError(err.message); });
+    return () => controller.abort();
+  }, [technicianReload]);
   const change = useMutation(refresh);
   const removal = useMutation(back);
   const canEdit = role !== 'viewer';
@@ -225,11 +242,20 @@ function UpdateRequest({ row, role, refresh, back }) {
       change.submit('/admin/requests/' + row._id, { method: 'PATCH', body: {
         version: row.version, status, technician_notes: notes, final_bill_note: bill,
         correction_requested: resolve ? false : undefined,
+        technician_id: technicianId !== (row.technician?.id || '') ? technicianId : undefined,
       } });
     }}>
       <Field label="Request status" id="staff-status"><select id="staff-status" value={status} disabled={!canEdit} onChange={(event) => setStatus(event.target.value)}>
         {Object.entries(statusNames).map(([key, value]) => <option value={key} key={key}>{value}</option>)}
       </select></Field>
+      <Field label="Assigned technician" id="staff-technician"><select id="staff-technician" value={technicianId} disabled={!canEdit || !technicians} onChange={(event) => setTechnicianId(event.target.value)}>
+        <option value="">Unassigned</option>
+        {row.technician && !technicians?.some((item) => item._id === row.technician.id) &&
+          <option value={row.technician.id} disabled>{row.technician.name}</option>}
+        {technicians?.map((item) => <option key={item._id} value={item._id} disabled={!item.active}>{item.name}{item.active ? '' : ' (inactive)'}</option>)}
+      </select></Field>
+      {technicianError && <Alert>{technicianError} <button type="button" className="text-link" onClick={() => setTechnicianReload((value) => value + 1)}>Refresh technicians</button></Alert>}
+      {canEdit && technicians?.length === 0 && <p className="muted text-sm">An owner can add technicians from the Technicians section.</p>}
       <Field label="Internal technician notes" id="staff-notes"><textarea id="staff-notes" maxLength={4000} rows={4} value={notes} readOnly={!canEdit} onChange={(event) => setNotes(event.target.value)} /></Field>
       <Field label="Final bill note (visible to customer when completed)" id="staff-bill"><textarea id="staff-bill" maxLength={4000} rows={4} value={bill} readOnly={!canEdit} onChange={(event) => setBill(event.target.value)} /></Field>
       {row.correction_requested && canEdit && <Checkbox checked={resolve} onChange={(event) => setResolve(event.target.checked)}>Mark the correction as reviewed</Checkbox>}
@@ -269,6 +295,7 @@ function Record({ id, role, back }) {
     ['Vehicle', [row.vehicle_make, row.vehicle_model, row.vehicle_year, row.fuel_type].filter(Boolean).join(' · ')],
     ['Registration', row.registration], ['Recent maintenance', row.maintenance_history], ['Problem', row.symptoms], ['Started', row.started_when],
     ['Type', row.request_type], ['Urgency', row.urgency], ['Requested next step', row.next_step.replaceAll('_', ' ')],
+    ['Assigned technician', row.technician?.name || 'Unassigned'],
     ['Initial guidance', row.analysis?.summary], ['Price estimate', row.estimate && `৳${row.estimate.min}–৳${row.estimate.max}${row.estimate.sample ? ' (sample)' : ''}`],
   ];
   return <>
@@ -292,6 +319,7 @@ function Record({ id, role, back }) {
         </section>
         <div className="record-side">
           <UpdateRequest key={row.version} row={row} role={role} refresh={async () => { await load(); setUpdated(true); }} back={back} />
+          <RequestEmails row={row} role={role} refresh={() => load()} />
           <section className="panel record-panel"><h2>Status history</h2><ol className="timeline">
             {row.history.map((item, index) => <li key={index}><span className="timeline-dot" /><div><strong>{statusNames[item.status]}</strong><span>{item.actor} · {dateTime(item.created_at)}</span></div></li>)}
           </ol></section>
@@ -361,7 +389,10 @@ export default function Admin() {
   if (!user) return <Login onLogin={setUser} />;
 
   const sections = [['queue', 'Requests', ClipboardList]];
-  if (user.role === 'owner') sections.push(['settings', 'Service settings', Settings2], ['audit', 'Activity log', History]);
+  if (user.role === 'owner') sections.push(
+    ['technicians', 'Technicians', Users], ['reports', 'Reports', ChartColumn],
+    ['settings', 'Service settings', Settings2], ['audit', 'Activity log', History],
+  );
   return <div className="admin-shell" lang="en">
     <aside className="admin-sidebar">
       <Brand staff />
@@ -382,6 +413,8 @@ export default function Admin() {
         }} />
         {tab === 'queue' && (record ? <Record key={record} id={record} role={user.role} back={() => open(null)} /> : <Queue open={open} refreshVersion={queueVersion} onLoaded={setQueueLoaded} />)}
         {tab === 'settings' && <AdminConfig />}
+        {tab === 'technicians' && <Technicians />}
+        {tab === 'reports' && <Reports />}
         {tab === 'audit' && <AuditLog />}
       </div>
     </main>

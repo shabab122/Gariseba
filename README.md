@@ -1,8 +1,8 @@
-# GariSeba 2.2
+# GariSeba 2.3
 
 GariSeba is a bilingual roadside request and vehicle guidance app for Dhaka. The project originated as LAGBO NAKI?. It uses React, HTML, CSS and Tailwind on the frontend, Node.js and Express for the API, and MongoDB for data. The Word guide in `docs/` covers the original GariSeba setup in Bangla.
 
-## Upgrade from 2.1 on Linux
+## Upgrade from 2.2 on Linux
 
 Stop the old Node server, extract the new archive in a separate directory, and copy your existing `.env` into the new `gariseba-mern` folder. Keep its MongoDB URI, database name and secrets so your accounts, requests and tracking keys carry over. Use the same running MongoDB instance. If you configured Compose for MongoDB 7.0, use your working `compose.yaml` and volume when starting MongoDB again.
 
@@ -15,6 +15,42 @@ npm start
 ```
 
 Open the address shown in the terminal. For an existing port 3030 setup, keep `PORT=3030` and `PUBLIC_BASE_URL=http://localhost:3030` in `.env` and open [http://localhost:3030](http://localhost:3030).
+
+## Version 2.3 features
+
+| Feature | How to use it |
+| --- | --- |
+| Technician assignment | An owner adds technicians from **Technicians**. Owners and dispatchers select **Assigned technician** in a request, then save. Change the selection to reassign, or choose **Unassigned**. |
+| Consented email status updates | Configure Resend below. Customers opt in and enter an email in the contact step. Each actual staff status change queues an email. The tracking page lets the customer stop updates. |
+| Reports and CSV | An owner opens **Reports**, chooses 1 to 366 inclusive received dates in Dhaka time, and optionally filters by type and current status. Use **Download CSV** for grouped date, type, status and count rows. |
+
+Deactivating a technician removes them from new assignment choices. Existing assignments keep the recorded name. Request edits and assignments use the existing version checks to reject concurrent stale saves. Older requests start unassigned.
+
+Reports count currently retained submitted requests by their received date and current status. Deleted requests are excluded. CSV output contains grouped counts. Exports include a UTF-8 marker for spreadsheet software and escape formula-leading values. CSV downloads use the report's applied filters.
+
+### Configure email status updates
+
+This release uses **email through Resend** for customer status messages. In your existing server `.env`, add a Resend sending key and a sender address on a verified domain.
+
+```dotenv
+RESEND_API_KEY=your-resend-sending-key
+NOTIFICATION_FROM=updates@your-verified-domain.com
+```
+
+Restart the app after editing. Use a plain email address for `NOTIFICATION_FROM`. Keep `PUBLIC_BASE_URL` set to the address customers can open. The consent option becomes available when the key and sender settings are present. Read the official [Resend send-email documentation](https://resend.com/docs/api-reference/emails/send-email) and [domain verification guide](https://resend.com/docs/dashboard/domains/introduction) for account setup.
+
+After consent, the request stores the recipient address. A status change stores its email job in the same atomic request update. The worker checks every five seconds and processes one eligible job at a time, preserving each request's message order. Sender, recipient and body are stored with the job so retries use the same payload. API keys stay in the server environment.
+
+Temporary network errors, rate limits and server failures retry automatically up to four attempts, respecting `Retry-After`. Expired worker leases recover after a restart. Each job has a stable idempotency key and a 23-hour retry window, within Resend's documented 24-hour key retention. A failed job can be retried by an owner or dispatcher from the request details during that window.
+
+The staff email panel shows queued, sending, accepted, failed or cancelled. **Accepted by email service** records the provider accepting the message. Check the email service dashboard when investigating mailbox delivery. Stopping updates cancels pending work. Emails already dispatched may still arrive. Deleting a request removes its queued jobs along with its other active data.
+
+### Verify version 2.3
+
+1. As an owner, add two technicians. Assign one to a request, change to the other, then clear the assignment. Check that a viewer cannot save an assignment.
+2. Configure email, submit a request with explicit email consent, and change its status as staff. Check the email panel and inbox. Submit another request without consent and confirm that status changes create no email job.
+3. Open tracking with the private key and stop email updates. Change the status again and confirm that further emails are not queued.
+4. As an owner, open Reports and choose a date range. Check type and status totals, download CSV, and compare its grouped counts with the applied report filters.
 
 ## Version 2.2 features
 
@@ -85,8 +121,8 @@ In the staff queue, date filters use Dhaka time and include both selected dates.
 | Role | Access |
 | --- | --- |
 | `viewer` | Read the queue, request details, history and photos |
-| `dispatcher` | Viewer access plus status, internal notes, completed bill notes and correction review |
-| `owner` | Dispatcher access plus delete, price rules, service areas, settings and activity log |
+| `dispatcher` | Viewer access plus status, technician assignments, internal notes, completed bill notes, correction review and failed-email retries |
+| `owner` | Dispatcher access plus delete, technician roster, reports/CSV, price rules, service areas, settings and activity log |
 
 Create additional accounts with `npm.cmd run create-admin -- <username> <role>`.
 
