@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import {
   ArrowDownLeft, ArrowLeft, ArrowRight, ArrowUpRight, ClipboardList, Gauge, History, LockKeyhole,
   Bell, ChartColumn, LogOut, RefreshCw, Search, Settings2, ShieldCheck, Trash2, TriangleAlert, Users,
@@ -13,7 +13,7 @@ import { ThemeButton } from './layout.jsx';
 import { Alert, Brand, Checkbox, dateTime, Dialog, Field, Status } from './ui.jsx';
 
 const statusNames = { received: 'Received', confirmed: 'Confirmed', in_progress: 'In progress', completed: 'Completed', cancelled: 'Cancelled', out_of_area: 'Outside area' };
-const emptyQueueFilters = { code: '', type: '', urgency: '', from: '', to: '' };
+const emptyQueueFilters = { code: '', type: '', urgency: '', from: '', to: '', technician: '' };
 
 function QueueUpdates({ username, refresh, refreshed }) {
   const [total, setTotal] = useState(null);
@@ -104,8 +104,11 @@ function Login({ onLogin }) {
   </div>;
 }
 
-function Queue({ open, refreshVersion, onLoaded }) {
+function Queue({ username, open, refreshVersion, onLoaded }) {
   const [params, setParams] = useSearchParams();
+  const location = useLocation();
+  const storedSearch = location.state?.staffQueueSearch;
+  const search = storedSearch?.username === username && typeof storedSearch.term === 'string' ? storedSearch.term : '';
   const status = Object.hasOwn(statusNames, params.get('status')) ? params.get('status') : '';
   const pageValue = Number(params.get('page'));
   const page = Number.isInteger(pageValue) && pageValue >= 1 && pageValue <= 500 ? pageValue : 1;
@@ -114,18 +117,35 @@ function Queue({ open, refreshVersion, onLoaded }) {
   const urgency = params.get('urgency') || '';
   const from = params.get('from') || '';
   const to = params.get('to') || '';
-  const filters = useMemo(() => ({ code, type, urgency, from, to }), [code, type, urgency, from, to]);
+  const technician = params.get('technician') || '';
+  const filters = useMemo(() => ({ code, type, urgency, from, to, technician }), [code, type, urgency, from, to, technician]);
   const [draft, setDraft] = useState(filters);
+  const [searchDraft, setSearchDraft] = useState(search);
+  const [technicians, setTechnicians] = useState(null);
+  const [technicianError, setTechnicianError] = useState('');
+  const [technicianReload, setTechnicianReload] = useState(0);
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [reload, setReload] = useState(0);
   useEffect(() => { setDraft(filters); }, [filters]);
+  useEffect(() => { setSearchDraft(search); }, [search]);
+  useEffect(() => {
+    const controller = new AbortController();
+    setTechnicianError('');
+    api('/admin/technicians', { signal: controller.signal })
+      .then((result) => { if (!controller.signal.aborted) setTechnicians(result.technicians); })
+      .catch(() => { if (!controller.signal.aborted) setTechnicianError('The technician choices could not load.'); });
+    return () => controller.abort();
+  }, [technicianReload]);
   useEffect(() => {
     const controller = new AbortController();
     setData(null);
     setError('');
-    const query = new URLSearchParams({ status, ...filters, page });
-    api('/admin/requests?' + query, { signal: controller.signal })
+    const query = { status, ...filters, page };
+    const request = search
+      ? api('/admin/requests/search', { method: 'POST', body: { ...query, search }, signal: controller.signal })
+      : api('/admin/requests?' + new URLSearchParams(query), { signal: controller.signal });
+    request
       .then((result) => {
         if (controller.signal.aborted) return;
         if (!Array.isArray(result.requests)) throw new Error('The request list could not be loaded. Try again.');
@@ -134,9 +154,9 @@ function Queue({ open, refreshVersion, onLoaded }) {
       })
       .catch((err) => { if (!controller.signal.aborted) setError(err.message); });
     return () => controller.abort();
-  }, [status, filters, page, reload, refreshVersion, onLoaded]);
+  }, [status, filters, search, page, reload, refreshVersion, onLoaded]);
 
-  function updateView(values) {
+  function updateView(values, nextSearch = search) {
     setParams((current) => {
       const next = new URLSearchParams(current);
       for (const [key, value] of Object.entries(values)) {
@@ -144,7 +164,7 @@ function Queue({ open, refreshVersion, onLoaded }) {
         else next.set(key, String(value));
       }
       return next;
-    });
+    }, { state: { ...location.state, staffQueueSearch: { username, term: nextSearch } } });
   }
 
   function editFilter(event) {
@@ -153,12 +173,16 @@ function Queue({ open, refreshVersion, onLoaded }) {
   }
   function applyFilters(event) {
     event.preventDefault();
-    updateView({ ...draft, code: draft.code.trim(), page: 1 });
-    setReload((value) => value + 1);
+    const next = { ...draft, code: draft.code.trim() };
+    const nextSearch = searchDraft.trim();
+    const unchanged = page === 1 && nextSearch === search && Object.keys(filters).every((key) => next[key] === filters[key]);
+    updateView({ ...next, page: 1 }, nextSearch);
+    if (unchanged) setReload((value) => value + 1);
   }
   function clearFilters() {
     setDraft(emptyQueueFilters);
-    updateView({ ...emptyQueueFilters, status: '', page: 1 });
+    setSearchDraft('');
+    updateView({ ...emptyQueueFilters, status: '', page: 1 }, '');
   }
 
   const counts = data?.counts || {};
@@ -184,7 +208,14 @@ function Queue({ open, refreshVersion, onLoaded }) {
           <Field id="queue-from" label="Received from (Dhaka)"><input id="queue-from" type="date" name="from" value={draft.from} onChange={editFilter} /></Field>
           <Field id="queue-to" label="Received through (Dhaka)"><input id="queue-to" type="date" name="to" min={draft.from || undefined} value={draft.to} onChange={editFilter} /></Field>
           <Field id="queue-search" label="Find a reference"><input id="queue-search" name="code" value={draft.code} maxLength={20} placeholder="LN-7K2M9Q" onChange={editFilter} /></Field>
+          <Field id="queue-technician" label="Assigned technician"><select id="queue-technician" name="technician" value={draft.technician} onChange={editFilter}>
+            <option value="">All technicians</option><option value="unassigned">Unassigned</option>
+            {draft.technician && draft.technician !== 'unassigned' && !technicians?.some((item) => item._id === draft.technician) && <option value={draft.technician}>Selected technician (unavailable)</option>}
+            {technicians?.map((item) => <option value={item._id} key={item._id}>{item.name}{item.active ? '' : ' (inactive)'}</option>)}
+          </select></Field>
+          <Field id="queue-customer" label="Find customer by name or phone"><input id="queue-customer" value={searchDraft} maxLength={80} autoComplete="off" placeholder="Name or phone (3+ digits)" onChange={(event) => setSearchDraft(event.target.value)} /></Field>
         </div>
+        {technicianError && <Alert>{technicianError} <button type="button" className="text-link" onClick={() => setTechnicianReload((value) => value + 1)}>Retry technician choices</button></Alert>}
         <button type="submit" className="btn btn-outline"><Search size={17} />Apply filters</button>
         <button type="button" className="text-link" onClick={clearFilters}>Clear filters</button>
       </form>
@@ -320,6 +351,14 @@ function Record({ id, role, back }) {
         <div className="record-side">
           <UpdateRequest key={row.version} row={row} role={role} refresh={async () => { await load(); setUpdated(true); }} back={back} />
           <RequestEmails row={row} role={role} refresh={() => load()} />
+          <section className="panel record-panel"><h2>Assignment history</h2>
+            {row.assignment_history?.length > 0 ? <ol className="timeline">
+              {row.assignment_history.map((item, index) => <li key={index}><span className="timeline-dot" /><div>
+                <strong>{item.from?.name || 'Unassigned'} → {item.to?.name || 'Unassigned'}</strong>
+                <span>{item.actor} · {dateTime(item.created_at)}</span>
+              </div></li>)}
+            </ol> : <p className="muted text-sm">Assignment changes saved from version 2.4 appear here.</p>}
+          </section>
           <section className="panel record-panel"><h2>Status history</h2><ol className="timeline">
             {row.history.map((item, index) => <li key={index}><span className="timeline-dot" /><div><strong>{statusNames[item.status]}</strong><span>{item.actor} · {dateTime(item.created_at)}</span></div></li>)}
           </ol></section>
@@ -411,7 +450,7 @@ export default function Admin() {
           open(null);
           setQueueVersion((value) => value + 1);
         }} />
-        {tab === 'queue' && (record ? <Record key={record} id={record} role={user.role} back={() => open(null)} /> : <Queue open={open} refreshVersion={queueVersion} onLoaded={setQueueLoaded} />)}
+        {tab === 'queue' && (record ? <Record key={record} id={record} role={user.role} back={() => open(null)} /> : <Queue username={user.username} open={open} refreshVersion={queueVersion} onLoaded={setQueueLoaded} />)}
         {tab === 'settings' && <AdminConfig />}
         {tab === 'technicians' && <Technicians />}
         {tab === 'reports' && <Reports />}

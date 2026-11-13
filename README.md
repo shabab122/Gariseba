@@ -1,8 +1,8 @@
-# GariSeba 2.3
+# GariSeba 2.4
 
 GariSeba is a bilingual roadside request and vehicle guidance app for Dhaka. The project originated as LAGBO NAKI?. It uses React, HTML, CSS and Tailwind on the frontend, Node.js and Express for the API, and MongoDB for data. The Word guide in `docs/` covers the original GariSeba setup in Bangla.
 
-## Upgrade from 2.2 on Linux
+## Upgrade from 2.3 on Linux
 
 Stop the old Node server, extract the new archive in a separate directory, and copy your existing `.env` into the new `gariseba-mern` folder. Keep its MongoDB URI, database name and secrets so your accounts, requests and tracking keys carry over. Use the same running MongoDB instance. If you configured Compose for MongoDB 7.0, use your working `compose.yaml` and volume when starting MongoDB again.
 
@@ -15,6 +15,25 @@ npm start
 ```
 
 Open the address shown in the terminal. For an existing port 3030 setup, keep `PORT=3030` and `PUBLIC_BASE_URL=http://localhost:3030` in `.env` and open [http://localhost:3030](http://localhost:3030).
+
+## Version 2.4 features
+
+| Feature | How to use it |
+| --- | --- |
+| Queue filter by technician | Choose **Assigned technician**, then **Apply filters**. Choose **Unassigned** for requests without an assignment. Inactive technicians remain searchable for their existing work. Combine this with status, type, urgency, received dates, reference and customer search. |
+| Assignment history | Open a request to see **Assignment history**. Each actual assignment, reassignment or removal records the previous and next technician, staff username and time. Viewers can read this history. |
+| Customer name or phone search | Enter a full or partial name or phone in **Find customer by name or phone**, then apply. Name matching is case-insensitive and treats punctuation as text. Phone search accepts 3 to 13 digits, Bangla digits and spaces, dashes or parentheses. A full Bangladesh mobile number matches local `01…` and international `+8801…` forms. |
+
+The technician filter is kept in the queue URL alongside the earlier filters and page. The applied customer search is kept in the browser history state for the signed-in username. It survives request details, returning to the queue, page reload and browser Back. Customer search requests use a CSRF-protected POST body so the UI keeps names and phone searches out of the URL. **Clear filters** clears both new filters and resets the queue page. Status counts above the queue keep their existing overall totals.
+
+History starts with assignment changes saved in version 2.4. Existing assignments and their saved names carry over, and their next change records the current assignment as its starting point. Earlier staff actors and times are not reconstructed. Assignment, status history and any consented status-email job are saved in the same version-checked MongoDB update. A conflicting save records no extra assignment event. Re-saving the same assignment or editing notes alone adds no assignment event. No database migration is required.
+
+### Verify version 2.4
+
+1. Filter by a technician, then by **Unassigned**. Combine with type, urgency, received dates and status. Open a result and return, then reload and check the same filters. An inactive technician should still show their existing assignments.
+2. Search an existing customer by a name fragment, local phone number, international phone number and Bangla phone digits. Check that the name or phone stays out of the address bar. Apply another search, use browser Back, and check the earlier search. Clear all filters.
+3. Assign a technician, reassign to another and clear the assignment. Check each history entry's previous and next technician, actor and time. Saving only notes should preserve the entry count. A viewer can read the history and cannot save assignments.
+4. For a request already opted into email updates, change the status and assignment together. Check both histories and the existing email queue. An obsolete version should return a conflict and add no duplicate entry.
 
 ## Version 2.3 features
 
