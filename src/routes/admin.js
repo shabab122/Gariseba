@@ -9,6 +9,7 @@ const { deleteRequest, submitted } = require('../lib/requests');
 const { testOpenAIConnection } = require('../lib/ai');
 const config = require('../config');
 const { dhakaDayStart } = require('../lib/request-dates');
+const { customerSearch } = require('../lib/customer-search');
 const { statusEmail, emailReady } = require('../lib/notifications');
 const { operationRoutes } = require('./operations');
 const sec = require('../lib/security');
@@ -86,23 +87,29 @@ function adminRoutes(db, limits, testConnection = testOpenAIConnection, email = 
     res.json(result);
   });
 
-  router.get('/requests', async (req, res) => {
-    const status = STATUSES.includes(req.query.status) ? req.query.status : null;
-    const code = clean(req.query.code, 20).toUpperCase();
-    const pageValue = Number(req.query.page);
+  async function listRequests(query, res) {
+    const status = STATUSES.includes(query.status) ? query.status : null;
+    const code = clean(query.code, 20).toUpperCase();
+    const pageValue = Number(query.page);
     const page = range(pageValue, 1, 500) ? pageValue : 1;
-    const { type = '', urgency = '' } = req.query;
+    const { type = '', urgency = '', technician = '' } = query;
     if (type !== '' && !TYPES.includes(type)) throw invalid('Choose a valid request type.');
     if (urgency !== '' && !['normal', 'urgent'].includes(urgency)) throw invalid('Choose a valid urgency.');
-    const from = dhakaDayStart(req.query.from);
-    const to = dhakaDayStart(req.query.to);
+    if (typeof technician !== 'string' || (technician !== '' && technician !== 'unassigned' &&
+        !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(technician))) {
+      throw invalid('Choose a valid technician filter.');
+    }
+    const from = dhakaDayStart(query.from);
+    const to = dhakaDayStart(query.to);
     if (from && to && from > to) throw invalid('The start date must be on or before the end date.');
 
-    const criteria = { ...submitted };
+    const criteria = { ...submitted, ...customerSearch(query.search) };
     if (status) criteria.status = status;
     if (code) criteria.public_code = code;
     if (type) criteria.request_type = type;
     if (urgency) criteria.urgency = urgency;
+    if (technician === 'unassigned') criteria['technician.id'] = { $in: [null, ''] };
+    else if (technician) criteria['technician.id'] = technician;
     if (from || to) {
       criteria.created_at = {};
       if (from) criteria.created_at.$gte = from;
@@ -127,6 +134,12 @@ function adminRoutes(db, limits, testConnection = testOpenAIConnection, email = 
       requests: rows.slice(0, pageSize), page, hasNext: rows.length > pageSize,
       counts: Object.fromEntries(stats.map(({ _id, count }) => [_id, count])),
     });
+  }
+
+  router.get('/requests', (req, res) => listRequests(req.query, res));
+  router.post('/requests/search', (req, res) => {
+    if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) throw invalid('Enter valid queue filters.');
+    return listRequests(req.body, res);
   });
 
   router.get('/requests/:id', async (req, res) => {
@@ -148,14 +161,16 @@ function adminRoutes(db, limits, testConnection = testOpenAIConnection, email = 
       if (!STATUSES.includes(body.status)) throw invalid('Choose a valid status.');
       fields.status = body.status;
     }
-    if (body.technician_id !== undefined && body.technician_id !== (row.technician?.id || '')) {
-      if (body.technician_id === '' || body.technician_id === null) {
-        fields.technician = null;
-      } else {
-        if (typeof body.technician_id !== 'string') throw invalid('Choose a valid technician.');
-        const technician = await db.technicians.findOne({ _id: body.technician_id, active: true });
-        if (!technician) throw invalid('Choose an active technician or refresh the technician list.');
-        fields.technician = { id: technician._id, name: technician.name };
+    if (body.technician_id !== undefined) {
+      if (body.technician_id !== null && typeof body.technician_id !== 'string') throw invalid('Choose a valid technician.');
+      const technicianId = body.technician_id ?? '';
+      if (technicianId !== (row.technician?.id || '')) {
+        if (technicianId === '') fields.technician = null;
+        else {
+          const technician = await db.technicians.findOne({ _id: technicianId, active: true });
+          if (!technician) throw invalid('Choose an active technician or refresh the technician list.');
+          fields.technician = { id: technician._id, name: technician.name };
+        }
       }
     }
     for (const key of ['technician_notes', 'final_bill_note']) {
@@ -172,6 +187,13 @@ function adminRoutes(db, limits, testConnection = testOpenAIConnection, email = 
     if (statusChanged) change.$push = { history: { status: fields.status, actor: req.admin.username, created_at: now } };
     if (statusChanged && row.consent_status_email && emailReady(email)) {
       change.$push.email_outbox = statusEmail(row, fields.status, email, now);
+    }
+    if (Object.hasOwn(fields, 'technician')) {
+      change.$push ??= {};
+      change.$push.assignment_history = {
+        from: row.technician || null, to: fields.technician,
+        actor: req.admin.username, created_at: now,
+      };
     }
     const result = await db.requests.updateOne({ _id: row._id, ...submitted, version: row.version }, change);
     if (!result.matchedCount) throw conflict();
