@@ -204,4 +204,36 @@ export const bn = {
   notFound: 'পাতাটি পাওয়া যায়নি',
 };
 
+Object.assign(en, {
+  pdfBill: 'Service bill', downloadBill: 'Download PDF bill', downloadingBill: 'Downloading…',
+  billPending: 'The team has not issued your final bill yet. Check again after they save it.',
+  feedbackTitle: 'Rate your service', feedbackHint: 'Share one rating after completion. Your feedback is visible to the service team.',
+  feedbackThanks: 'Thank you for your feedback.', ratingLabel: 'Rating', chooseRating: 'Choose a rating',
+  feedbackComment: 'Your comments', submitFeedback: 'Submit feedback',
+  smsConsent: 'Send status updates by SMS to my callback number. I can stop updates from the tracking page.',
+  smsUpdates: 'SMS status updates', smsUnavailable: 'SMS status updates are currently unavailable.',
+  stopSms: 'Stop SMS updates', stopSmsTitle: 'Stop SMS status updates?',
+  stopSmsBody: 'Future and waiting SMS updates will stop. A message already submitted to the provider may still arrive.',
+  smsStopped: 'SMS status updates have stopped.',
+});
+Object.assign(bn, {
+  pdfBill: 'সার্ভিস বিল', downloadBill: 'PDF বিল ডাউনলোড করুন', downloadingBill: 'ডাউনলোড হচ্ছে…',
+  billPending: 'স্টাফ এখনও চূড়ান্ত বিল তৈরি করেনি। বিল সংরক্ষণ করার পর আবার দেখুন।',
+  feedbackTitle: 'সার্ভিসের রেটিং দিন', feedbackHint: 'কাজ সম্পন্ন হলে একবার রেটিং দিতে পারবেন। আপনার মতামত সার্ভিস টিম দেখতে পাবে।',
+  feedbackThanks: 'আপনার মতামত সংরক্ষিত হয়েছে।', ratingLabel: 'রেটিং', chooseRating: 'রেটিং বেছে নিন',
+  feedbackComment: 'আপনার মতামত', submitFeedback: 'মতামত জমা দিন',
+  smsConsent: 'আমার কলব্যাক নম্বরে SMS-এ স্ট্যাটাস আপডেট পাঠান। ট্র্যাকিং পাতা থেকে বন্ধ করতে পারব।',
+  smsUpdates: 'SMS স্ট্যাটাস আপডেট', smsUnavailable: 'এই মুহূর্তে SMS স্ট্যাটাস আপডেট চালু নেই।',
+  stopSms: 'SMS আপডেট বন্ধ করুন', stopSmsTitle: 'SMS স্ট্যাটাস আপডেট বন্ধ করবেন?',
+  stopSmsBody: 'পরবর্তী ও অপেক্ষমাণ SMS আপডেট বন্ধ হবে। ইতোমধ্যে provider-এ পাঠানো বার্তা আসতে পারে।',
+  smsStopped: 'SMS স্ট্যাটাস আপডেট বন্ধ হয়েছে।',
+});
+en.privacySections.push(
+  ['SMS status updates', 'With your separate permission, Twilio receives your callback number, request reference and status to send SMS. Use your reference and private tracking key to stop updates. Messages already submitted may still arrive. Provider retention applies to submitted messages.'],
+  ['Bills and feedback', 'After completion, your private tracking key allows you to download the issued bill and submit one rating with optional comments. Authorized staff can view feedback. Deleting the active request also removes its saved bill and feedback; previously downloaded copies and backups have separate retention.'],
+);
+bn.privacySections.push(
+  ['SMS স্ট্যাটাস আপডেট', 'আলাদা সম্মতি দিলে SMS পাঠাতে Twilio আপনার কলব্যাক নম্বর, অনুরোধের রেফারেন্স ও স্ট্যাটাস পাবে। রেফারেন্স ও গোপন কী দিয়ে ট্র্যাকিং পাতা থেকে আপডেট বন্ধ করতে পারবেন। আগে পাঠানো বার্তা আসতে পারে এবং provider-এর সংরক্ষণ নীতি অনুযায়ী থাকতে পারে।'],
+  ['বিল ও মতামত', 'কাজ সম্পন্ন হলে গোপন ট্র্যাকিং কী দিয়ে প্রকাশিত বিল ডাউনলোড ও একবার রেটিং দিতে পারবেন। অনুমোদিত স্টাফ মতামত দেখতে পারেন। সক্রিয় অনুরোধ মুছলে তার বিল ও মতামতও মুছে যায়; আগের ডাউনলোড ও ব্যাকআপ আলাদাভাবে থাকতে পারে।'],
+);
 export const copy = { en, bn };

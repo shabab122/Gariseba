@@ -9,6 +9,8 @@ import { AdminConfig, useMutation } from './admin-config.jsx';
 import { Technicians } from './admin-technicians.jsx';
 import { Reports } from './admin-reports.jsx';
 import { RequestEmails } from './admin-emails.jsx';
+import { RequestInvoice, RequestFeedback } from './admin-invoice.jsx';
+import { RequestSms } from './admin-sms.jsx';
 import { TechnicianWorkload } from './admin-workload.jsx';
 import { TechnicianPortal } from './technician-portal.jsx';
 import { ArrivalEtaField, dhakaEtaInput, etaRequestValue } from './arrival-eta.jsx';
@@ -363,6 +365,9 @@ function Record({ id, role, back }) {
         <div className="record-side">
           <UpdateRequest key={row.version} row={row} role={role} refresh={async () => { await load(); setUpdated(true); }} back={back} />
           <RequestEmails row={row} role={role} refresh={() => load()} />
+          <RequestInvoice key={'invoice-' + row.version} row={row} role={role} refresh={() => load()} />
+          <RequestFeedback row={row} />
+          <RequestSms row={row} role={role} refresh={() => load()} />
           <section className="panel record-panel"><h2>Assignment history</h2>
             {row.assignment_history?.length > 0 ? <ol className="timeline">
               {row.assignment_history.map((item, index) => <li key={index}><span className="timeline-dot" /><div>

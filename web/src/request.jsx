@@ -16,7 +16,7 @@ const initial = (type, language, symptoms) => ({
   customer_name: '', callback_phone: '', language, location_text: '', confirm_dhaka: false,
   map_lat: null, map_lng: null, vehicle_make: '', vehicle_model: '', vehicle_year: '', fuel_type: 'unknown',
   registration: '', maintenance_history: '', next_step: 'technician', consent_store: false, consent_whatsapp_share: false,
-  notification_email: '', consent_status_email: false,
+  notification_email: '', consent_status_email: false, consent_status_sms: false,
 });
 const fieldSteps = [
   ['request_type', 'symptoms', 'started_when'], ['customer_name', 'callback_phone', 'notification_email', 'location_text', 'map_lat'],
@@ -206,6 +206,7 @@ function Review({ data, photos, go, set, errors }) {
     [t.problem, [t.requestTypes[data.request_type], data.symptoms, data.started_when, data.urgency === 'urgent' ? t.urgent : t.normal], 0],
     [t.contact, [data.customer_name, data.callback_phone, data.location_text, data.language === 'bn' ? 'বাংলা' : 'English',
       data.consent_status_email && t.emailUpdates + ' · ' + data.notification_email,
+      data.consent_status_sms && t.smsUpdates + ' · ' + data.callback_phone,
       hasMap && <a key="map" href={`https://maps.google.com/?q=${data.map_lat},${data.map_lng}`} target="_blank" rel="noreferrer" className="text-link">{t.pinAdded}</a>], 1],
     [t.vehicle, [vehicle, data.registration, data.maintenance_history], 2],
     [t.attach, [photos.length ? photos.map((photo) => t.photoLabels[photo.label]).join(', ') : t.none], 3],
@@ -436,6 +437,9 @@ export default function RequestWizard() {
             <Checkbox checked={data.consent_status_email} onChange={(event) => set('consent_status_email', event.target.checked)}>{t.emailConsent}</Checkbox>
             {data.consent_status_email && <TextField {...problemFields} name="notification_email" label={t.emailAddress} hint={t.emailHint} maxLength={254} type="email" autoComplete="email" required />}
           </> : <p className="muted text-sm">{t.emailUnavailable}</p>}
+          {config?.integrations.statusSms
+            ? <Checkbox checked={data.consent_status_sms} onChange={(event) => set('consent_status_sms', event.target.checked)}>{t.smsConsent}</Checkbox>
+            : <p className="muted text-sm">{t.smsUnavailable}</p>}
           <TextField {...problemFields} name="location_text" label={t.where} hint={t.whereHint} maxLength={300} multiline rows={3} disabled={busy === 'area'} required />
           <div className="flex flex-wrap items-center gap-3">
             <button type="button" className="btn btn-outline" onClick={requestCheck} disabled={locked}>{busy === 'area' ? t.checking : t.areaCheck}</button>

@@ -14,6 +14,8 @@ const { statusEmail, emailReady } = require('../lib/notifications');
 const { operationRoutes } = require('./operations');
 const { technicianRoutes } = require('./technician');
 const { applyArrivalEta } = require('../lib/arrival-eta');
+const { defaultSms, smsReady, statusSms } = require('../lib/sms');
+const { billingRoutes } = require('./billing');
 const sec = require('../lib/security');
 
 const DUMMY_HASH = bcrypt.hashSync('not-a-real-gariseba-password', 12);
@@ -21,6 +23,7 @@ const pageSize = 20;
 const staffProjection = {
   tracking_token_hash: 0, fingerprint: 0, 'photos.content': 0,
   'email_outbox.payload': 0, 'email_outbox.claim_token': 0, notification_lock_token: 0,
+  'sms_outbox.payload': 0, 'sms_outbox.claim_token': 0, 'sms_outbox.provider_account': 0, sms_lock_token: 0,
 };
 const missing = () => new HttpError(404, 'not_found', 'The record could not be found.');
 const invalid = (message) => new HttpError(422, 'validation', message);
@@ -38,7 +41,7 @@ async function registerFailure(db, user, now) {
   } }]);
 }
 
-function adminRoutes(db, limits, testConnection = testOpenAIConnection, email = config.email, deliveryFetcher = fetch) {
+function adminRoutes(db, limits, testConnection = testOpenAIConnection, email = config.email, deliveryFetcher = fetch, sms = defaultSms, smsFetcher = fetch) {
   const router = express.Router();
   const role = (name) => sec.requireAdmin(db, name);
   router.post('/login', limits.login, async (req, res) => {
@@ -78,9 +81,10 @@ function adminRoutes(db, limits, testConnection = testOpenAIConnection, email = 
 
   router.use(limits.admin, role('technician'));
   router.get('/me', (req, res) => res.json({ user: req.admin }));
-  router.use('/technician', technicianRoutes(db, email));
+  router.use('/technician', technicianRoutes(db, email, sms));
   router.use(role('viewer'));
-  router.use(operationRoutes(db, { email, deliveryFetcher, limits }));
+  router.use(operationRoutes(db, { email, deliveryFetcher, limits, sms, smsFetcher }));
+  router.use(billingRoutes(db));
 
   router.get('/queue-updates', async (req, res) => {
     const totalReceived = await db.audit.countDocuments({ event: 'request_created' });
@@ -161,7 +165,7 @@ function adminRoutes(db, limits, testConnection = testOpenAIConnection, email = 
 
   router.patch('/requests/:id', role('dispatcher'), async (req, res) => {
     const row = await db.requests.findOne({ _id: req.params.id, ...submitted }, {
-      projection: { public_code: 1, status: 1, version: 1, technician: 1, arrival_eta: 1, language: 1, consent_status_email: 1, notification_email: 1 },
+      projection: { public_code: 1, status: 1, version: 1, technician: 1, arrival_eta: 1, language: 1, consent_status_email: 1, notification_email: 1, consent_status_sms: 1, callback_phone: 1 },
     });
     if (!row) throw missing();
     const body = req.body || {};
@@ -199,6 +203,7 @@ function adminRoutes(db, limits, testConnection = testOpenAIConnection, email = 
     if (statusChanged && row.consent_status_email && emailReady(email)) {
       change.$push.email_outbox = statusEmail(row, fields.status, email, now);
     }
+    if (statusChanged && row.consent_status_sms && smsReady(sms)) change.$push.sms_outbox = statusSms(row, fields.status, now);
     if (Object.hasOwn(fields, 'technician')) {
       change.$push ??= {};
       change.$push.assignment_history = {

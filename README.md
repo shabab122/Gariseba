@@ -1,8 +1,8 @@
-# GariSeba 2.6
+# GariSeba 2.7
 
 GariSeba is a bilingual roadside request and vehicle guidance app for Dhaka. The project originated as LAGBO NAKI?. It uses React, HTML, CSS and Tailwind on the frontend, Node.js and Express for the API, and MongoDB for data. The Word guide in `docs/` covers the original GariSeba setup in Bangla.
 
-## Upgrade from 2.5 on Linux
+## Upgrade from 2.6 on Linux
 
 Stop the old Node server, extract the new archive in a separate directory, and copy your existing `.env` into the new `gariseba-mern` folder. Keep its MongoDB URI, database name and secrets so your accounts, requests and tracking keys carry over. Use the same running MongoDB instance. If you configured Compose for MongoDB 7.0, use your working `compose.yaml` and volume when starting MongoDB again.
 
@@ -15,6 +15,38 @@ npm start
 ```
 
 Open the address shown in the terminal. For an existing port 3030 setup, keep `PORT=3030` and `PUBLIC_BASE_URL=http://localhost:3030` in `.env` and open [http://localhost:3030](http://localhost:3030).
+
+## Version 2.7 features
+
+This update adds only final PDF bills, customer ratings and consented SMS status updates to v2.6. The existing stack and account/configuration system are retained. Keep your original `.env` and the same database; there is no account reseed or manual data migration.
+
+| Feature | How to use it |
+| --- | --- |
+| Downloadable PDF bill | After a request is **Completed**, an owner or dispatcher enters up to 20 bill items, quantities, BDT prices, an optional discount and notes in **PDF service bill**, then chooses **Issue PDF bill**. The customer downloads it from private tracking. Staff viewers can download an issued bill but cannot change it. |
+| Customer rating and feedback | After completion, a customer uses the reference and private tracking key to submit one whole rating from 1 to 5 and optional comments. Staff can read the saved feedback in request details. |
+| SMS status updates | New requests can separately opt in when SMS is configured. Staff and assigned technician status changes queue SMS to the callback number. Staff can inspect delivery, and customers can stop updates from private tracking. |
+
+### PDF bills and feedback
+
+Bill amounts are validated with at most two decimal places and stored as integer poisha, including item totals and discounts. The bill shows final charges entered by staff, not the assistant's estimate. Discounts cannot exceed the subtotal. A zero-price item or fully discounted bill is allowed. The PDF uses embedded fonts, supports Bengali and English, and paginates long bills. It does not claim that payment has been received.
+
+Revising an issued bill keeps its original number and issue date, increments its revision, and records the latest update time. Existing `final_bill_note` text is retained. Completed legacy requests can receive bills and feedback too. A request must currently be Completed to issue or download a bill; reopening the work keeps the saved bill but hides the customer download until completion again.
+
+Customer bill downloads send the reference/key in a POST body with CSRF protection; the secret is not placed in URLs. The public lookup returns only a small bill summary and the customer's feedback. It does not expose internal notes, staff actors, notification payloads, or technician account details. Feedback is stored as text and rendered as text. Repeating the same feedback after a lost response is safe; a different second rating is rejected. Staff and technicians cannot submit customer feedback without the private tracking key.
+
+### Optional SMS configuration
+
+PDF bills and feedback need no new provider credentials. SMS needs your own Twilio account and SMS-capable sender. It is disabled until you add the optional SMS variables; old `.env` entries and existing API keys stay the same. Read [docs/SMS_SETUP.md](docs/SMS_SETUP.md) for the exact setup and live test steps.
+
+Existing requests are not automatically enrolled in SMS. Waiting messages are claimed atomically, with bounded retries for explicit HTTP 429 responses. Uncertain network/provider outcomes are shown as Unknown and are not automatically resent. Stopping SMS or deleting a request cancels its local waiting jobs. Already submitted messages may still arrive.
+
+### Release verification
+
+The v2.7 release passed 55 automated tests against a temporary real MongoDB database, a production frontend build, and desktop/mobile browser checks for the new bill/feedback/SMS flow plus earlier v2.1-v2.6 workflows. Short and four-page Bengali/English invoices were rendered and visually checked, including final amounts and page footers. The production dependency audit reported no known advisories at release verification.
+
+SMS and email provider responses in automated/browser tests are simulated with synthetic credentials. Live delivery to a real recipient needs your configured provider account and a separate test in your environment. No paid SMS or real customer messages were sent during release verification.
+
+All earlier v2.6 functionality remains below.
 
 ## Version 2.6 features
 

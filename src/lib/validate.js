@@ -89,6 +89,8 @@ function validateRequest(body) {
   out.consent_status_email = b.consent_status_email === true;
   out.notification_email = out.consent_status_email ? normalizeEmail(b.notification_email) : null;
   if (out.consent_status_email && !out.notification_email) errors.notification_email = 'Enter a valid email address for status updates.';
+  // Omit false for compatibility with fingerprints created before SMS existed.
+  if (b.consent_status_sms === true) out.consent_status_sms = true;
 
   return { ok: Object.keys(errors).length === 0, errors, value: out };
 }

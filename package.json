@@ -1,6 +1,6 @@
 {
   "name": "gariseba-mern",
-  "version": "2.6.0",
+  "version": "2.7.0",
   "private": true,
   "description": "Bilingual vehicle help and roadside request management for Dhaka",
   "engines": {
@@ -15,7 +15,7 @@
     "create-admin": "node scripts/create-admin.js",
     "import:sqlite": "node --experimental-sqlite scripts/import-sqlite.js",
     "backup": "node scripts/backup.js",
-    "test": "node --experimental-sqlite --test test/logic.test.js test/integration.test.js test/operations.test.js",
+    "test": "node --experimental-sqlite --test test/logic.test.js test/integration.test.js test/operations.test.js test/aftercare.test.js",
     "test:unit": "node --test test/logic.test.js"
   },
   "dependencies": {
@@ -29,6 +29,7 @@
     "lucide-react": "^1.70.0",
     "mongodb": "^6.22.0",
     "multer": "^2.5.0",
+    "pdfkit": "0.20.2",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-router-dom": "^7.18.5",
