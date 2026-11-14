@@ -12,6 +12,8 @@ const { dhakaDayStart } = require('../lib/request-dates');
 const { customerSearch } = require('../lib/customer-search');
 const { statusEmail, emailReady } = require('../lib/notifications');
 const { operationRoutes } = require('./operations');
+const { technicianRoutes } = require('./technician');
+const { applyArrivalEta } = require('../lib/arrival-eta');
 const sec = require('../lib/security');
 
 const DUMMY_HASH = bcrypt.hashSync('not-a-real-gariseba-password', 12);
@@ -36,7 +38,7 @@ async function registerFailure(db, user, now) {
   } }]);
 }
 
-function adminRoutes(db, limits, testConnection = testOpenAIConnection, email = config.email) {
+function adminRoutes(db, limits, testConnection = testOpenAIConnection, email = config.email, deliveryFetcher = fetch) {
   const router = express.Router();
   const role = (name) => sec.requireAdmin(db, name);
   router.post('/login', limits.login, async (req, res) => {
@@ -52,6 +54,8 @@ function adminRoutes(db, limits, testConnection = testOpenAIConnection, email = 
       await sec.audit(db, req, user?._id || 'unknown', 'admin_login_failed');
       throw denied();
     }
+    if (user.role === 'technician' && (user.enabled === false || typeof user.technician_id !== 'string' ||
+        !await db.technicians.findOne({ _id: user.technician_id }, { projection: { _id: 1 } }))) throw denied();
     const reset = await db.adminUsers.updateOne({
       _id: user._id, authVersion: user.authVersion, $or: [{ lockedUntil: null }, { lockedUntil: { $lte: now } }],
     }, { $set: { failedLogins: 0, lockedUntil: null } });
@@ -72,9 +76,11 @@ function adminRoutes(db, limits, testConnection = testOpenAIConnection, email = 
     res.clearCookie(sec.cookieName, clearOptions).json({ ok: true });
   });
 
-  router.use(limits.admin, role('viewer'));
+  router.use(limits.admin, role('technician'));
   router.get('/me', (req, res) => res.json({ user: req.admin }));
-  router.use(operationRoutes(db));
+  router.use('/technician', technicianRoutes(db, email));
+  router.use(role('viewer'));
+  router.use(operationRoutes(db, { email, deliveryFetcher, limits }));
 
   router.get('/queue-updates', async (req, res) => {
     const totalReceived = await db.audit.countDocuments({ event: 'request_created' });
@@ -155,7 +161,7 @@ function adminRoutes(db, limits, testConnection = testOpenAIConnection, email = 
 
   router.patch('/requests/:id', role('dispatcher'), async (req, res) => {
     const row = await db.requests.findOne({ _id: req.params.id, ...submitted }, {
-      projection: { public_code: 1, status: 1, version: 1, technician: 1, language: 1, consent_status_email: 1, notification_email: 1 },
+      projection: { public_code: 1, status: 1, version: 1, technician: 1, arrival_eta: 1, language: 1, consent_status_email: 1, notification_email: 1 },
     });
     if (!row) throw missing();
     const body = req.body || {};
@@ -184,8 +190,9 @@ function adminRoutes(db, limits, testConnection = testOpenAIConnection, email = 
       }
     }
     if (body.correction_requested === false) fields.correction_requested = false;
-    if (!Object.keys(fields).length) throw invalid('Nothing to update.');
     const now = new Date();
+    applyArrivalEta(row, fields, body.arrival_eta, now);
+    if (!Object.keys(fields).length) throw invalid('Nothing to update.');
     const change = { $set: { ...fields, updated_at: now }, $inc: { version: 1 } };
     const statusChanged = fields.status && fields.status !== row.status;
     if (statusChanged) change.$push = { history: { status: fields.status, actor: req.admin.username, created_at: now } };

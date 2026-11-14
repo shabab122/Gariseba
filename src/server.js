@@ -12,7 +12,7 @@ const { HttpError } = require('./lib/http');
 const sec = require('./lib/security');
 const { startEmailWorker } = require('./lib/notifications');
 
-function createApp(db, { analyzer, aiConnectionTest, email = config.email } = {}) {
+function createApp(db, { analyzer, aiConnectionTest, email = config.email, deliveryFetcher = fetch } = {}) {
   const app = express();
   const limits = sec.makeLimits();
   const dist = path.join(config.root, 'dist');
@@ -47,7 +47,7 @@ function createApp(db, { analyzer, aiConnectionTest, email = config.email } = {}
     next();
   }, limits.general, express.json({ limit: '50kb' }), sec.sessionMiddleware(db), sec.csrfProtect);
   app.use('/api', publicRoutes(db, limits, analyzer, email));
-  app.use('/api/admin', adminRoutes(db, limits, aiConnectionTest, email));
+  app.use('/api/admin', adminRoutes(db, limits, aiConnectionTest, email, deliveryFetcher));
   app.use('/api', (req, res) => res.status(404).json({ error: 'not_found', message: 'This endpoint does not exist.' }));
 
   app.get('/admin.html', (req, res) => res.redirect(301, '/admin'));

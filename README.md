@@ -1,8 +1,8 @@
-# GariSeba 2.5
+# GariSeba 2.6
 
 GariSeba is a bilingual roadside request and vehicle guidance app for Dhaka. The project originated as LAGBO NAKI?. It uses React, HTML, CSS and Tailwind on the frontend, Node.js and Express for the API, and MongoDB for data. The Word guide in `docs/` covers the original GariSeba setup in Bangla.
 
-## Upgrade from 2.4 on Linux
+## Upgrade from 2.5 on Linux
 
 Stop the old Node server, extract the new archive in a separate directory, and copy your existing `.env` into the new `gariseba-mern` folder. Keep its MongoDB URI, database name and secrets so your accounts, requests and tracking keys carry over. Use the same running MongoDB instance. If you configured Compose for MongoDB 7.0, use your working `compose.yaml` and volume when starting MongoDB again.
 
@@ -15,6 +15,53 @@ npm start
 ```
 
 Open the address shown in the terminal. For an existing port 3030 setup, keep `PORT=3030` and `PUBLIC_BASE_URL=http://localhost:3030` in `.env` and open [http://localhost:3030](http://localhost:3030).
+
+## Version 2.6 features
+
+| Feature | How to use it |
+| --- | --- |
+| Technician sign-in | As an owner, open **Technicians**, choose **Login account** for a technician, and create a username and initial password. The technician signs in at `/admin` and sees **My assigned requests**. |
+| Estimated arrival | An owner or dispatcher assigns a technician and enters **Estimated arrival (Dhaka time)** in an open request. The assigned technician can also update the estimate. Customers see it on their private tracking page in English or Bangla. |
+| Email delivery lookup | In a staff request's email panel, an owner or dispatcher chooses **Check delivery** on a message accepted by the email service. The latest provider event and check time are saved for staff to read. |
+
+### Technician accounts and permissions
+
+Existing staff usernames, passwords, roles and sessions retain their existing configuration. Existing technician roster entries get a login only when an owner creates one. Each roster entry has at most one technician login, and creating an account cannot replace an existing staff username.
+
+Passwords use the existing bcrypt strength and need at least 12 characters, at most 72 UTF-8 bytes, including a letter and a number. Owners can reset a technician password or turn off **Allow technician sign-in** from the same account dialog. Saving account changes revokes that technician's earlier sessions. Account edits check their current version before saving.
+
+**Available for new assignments** keeps its earlier roster meaning. Turning it off stops new assignments. It does not disable the technician's login or remove their existing work. Use **Allow technician sign-in** to suspend account access.
+
+Technicians can list their own assigned requests, filter them by status, view the contact, location, vehicle details and private photos needed for that work, and update work notes and an arrival estimate on open requests. They can start a Received or Confirmed request as **In progress**, then mark it **Completed**. Closed requests are read-only. Other status decisions, reassignment, billing, deletion, email controls, reports, settings, audit events and the global staff queue keep their staff-only access.
+
+Every request and photo read checks the current assignment on the server. A reassigned request stops being accessible to its earlier technician. Work saves check both the current assignment and request version. Actual status changes append the actor to status history and queue any consented email in the same MongoDB update.
+
+### Arrival estimates
+
+The form uses Dhaka wall-clock time regardless of the browser or server timezone. The server stores a UTC date and validates the estimate against the next 48 hours, with a five-minute grace for minute-level input and clock differences. An estimate needs an assigned technician and an open request. A staff edit can set an assignment and its estimate together.
+
+Changing or clearing the assigned technician removes the previous estimate. Closing a request also clears it. A staff reassignment can include a new estimate in the same save. Existing estimates can remain while staff edit other fields. A passed estimate is labelled as awaiting an update on the tracking page.
+
+The private tracking key protects the estimate along with the earlier tracking information. Active tracking keeps its once-a-minute refresh. The displayed time is a team estimate. Live GPS and automatic travel-time calculation remain outside this feature.
+
+### Checking email delivery
+
+This release reuses `RESEND_API_KEY` and the stored provider email ID. No webhook, SDK dependency or new environment variable is required. **Check delivery** calls Resend's read-only [Retrieve Sent Email API](https://resend.com/docs/api-reference/emails/retrieve-email) and stores only the event and check time. It does not send, resend or retry an email. The original email job state and ordering stay intact.
+
+The key needs permission to retrieve sent emails. A Sending access key can send emails but cannot perform this lookup. Resend supports Full access for reading resources. An owner can review the existing key's permission in the [API key dashboard](https://resend.com/docs/dashboard/api-keys/introduction). The application does not change the key or its permissions. A 401/403 lookup shows a safe permission message while the existing sending flow continues. Your real key and account are needed to verify a live provider lookup.
+
+Provider events include sent, delivered, delayed, bounced, failed, complained, suppressed and reported opens or clicks. **Delivered to recipient mail server** means that server accepted the email. It does not establish inbox placement or a human read. See the official [email events guide](https://resend.com/docs/dashboard/emails/manage-emails). The panel labels opens and clicks as provider reports.
+
+A check is limited to once per email every 30 seconds and 12 attempts per minute per IP. Viewers can read the saved result and cannot request a provider lookup. Timeouts, provider rate limits, missing messages and unsupported responses show safe result codes. A failed check keeps the last confirmed result. The app does not store the provider response's email body or recipient metadata. Deleted requests cannot be recreated by an in-flight lookup.
+
+### Verify version 2.6
+
+1. Create a technician login from its roster entry. Sign in in a separate browser. Verify that only that technician's assigned requests and photos appear and that staff reports and the global queue are denied. Change its sign-in permission and confirm the earlier session stops working.
+2. Save an arrival estimate as staff and check private tracking in English and Bangla. Update it as the assigned technician. Reassign the request, clear the assignment, and close the request, checking that the earlier estimate is removed.
+3. As the technician, start and complete an assigned request. Confirm status history records the actor and any consented email is queued once. Try an obsolete request version and confirm a conflict is shown.
+4. With your Resend account configured, wait for a status email to be accepted and choose **Check delivery**. Compare the saved result with the provider dashboard. Verify the cooldown, a Sending-only key's permission error and a viewer's read-only access.
+
+This upgrade adds a unique index for technician account links automatically when connecting to the existing database. It requires no manual data migration, new dependencies or replacement of existing credentials. Automated checks use isolated databases, synthetic accounts and simulated provider responses.
 
 ## Version 2.5 features
 
@@ -165,10 +212,13 @@ In the staff queue, date filters use Dhaka time and include both selected dates.
 | Role | Access |
 | --- | --- |
 | `viewer` | Read the queue, request details, history and photos |
-| `dispatcher` | Viewer access plus status, technician assignments, internal notes, completed bill notes, correction review and failed-email retries |
-| `owner` | Dispatcher access plus delete, technician roster, reports/CSV, price rules, service areas, settings and activity log |
+| `technician` | Own assigned requests and photos, work progress, work notes and arrival estimate on open requests |
+| `dispatcher` | Viewer access plus status, technician assignments, arrival estimates, internal notes, completed bill notes, correction review, delivery checks and failed-email retries |
+| `owner` | Dispatcher access plus delete, technician roster/login accounts, reports/CSV, price rules, service areas, settings and activity log |
 
 Create additional accounts with `npm.cmd run create-admin -- <username> <role>`.
+
+That command continues to manage owner, dispatcher and viewer accounts. Create and manage technician logins from the owner's **Technicians → Login account** dialog.
 
 ### Live AI
 

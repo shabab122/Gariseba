@@ -10,6 +10,7 @@ const { processEmailJob, statusEmail } = require('../src/lib/notifications');
 const { deleteRequest } = require('../src/lib/requests');
 const { validateRequest } = require('../src/lib/validate');
 const { sha256 } = require('../src/lib/security');
+const { checkEmailDelivery } = require('../src/lib/email-delivery');
 
 const email = { key: 'synthetic-email-key', from: 'updates@example.test' };
 const input = {
@@ -35,7 +36,7 @@ function client(base) {
   return { call, post: (path, body, extra) => call(path, { method: 'POST', body, ...extra }) };
 }
 
-async function fixture(t) {
+async function fixture(t, options = {}) {
   const db = await connectDatabase({ dbName: 'gariseba_operations_' + randomUUID().replaceAll('-', ''), uri: process.env.MONGODB_TEST_URI || undefined });
   await ensureDefaults(db);
   const password = 'SyntheticTestOnly123';
@@ -43,7 +44,7 @@ async function fixture(t) {
   await db.adminUsers.insertMany(['owner', 'dispatcher', 'viewer'].map((role) => ({
     _id: role, role, passwordHash, authVersion: 1, failedLogins: 0, lockedUntil: null,
   })));
-  const server = createApp(db, { email }).listen(0, '127.0.0.1');
+  const server = createApp(db, { email, ...options }).listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(async () => {
     await new Promise((resolve) => server.close(resolve));
@@ -55,7 +56,7 @@ async function fixture(t) {
   for (const [username, browser] of [['owner', owner], ['dispatcher', dispatcher], ['viewer', viewer]]) {
     assert.equal((await browser.post('/admin/login', { username, password })).status, 200);
   }
-  return { db, customer, owner, dispatcher, viewer };
+  return { db, customer, owner, dispatcher, viewer, base };
 }
 
 test('technician assignments are versioned, permission checked and compatible with existing requests', { timeout: 25000 }, async (t) => {
@@ -511,4 +512,219 @@ test('queue sorting preserves default order, prioritizes urgency with stable pag
   for (const sort of ['descending', ['urgent'], { $ne: null }, null, 1]) {
     assert.equal((await owner.post('/admin/requests/search', { ...filters, search: 'Sort Driver', sort })).status, 422);
   }
+});
+
+test('owners provision and suspend technician logins without changing existing staff credentials', { timeout: 30000 }, async (t) => {
+  const { db, owner, dispatcher, viewer, customer, base } = await fixture(t);
+  const original = await db.adminUsers.findOne({ _id: 'owner' });
+  const a = (await owner.post('/admin/technicians', { name: 'Login technician' })).data.technician;
+  const b = (await owner.post('/admin/technicians', { name: 'Other login technician' })).data.technician;
+  const endpoint = '/admin/technicians/' + a._id + '/account';
+  const body = { username: 'tech-login', password: 'SyntheticTech1234' };
+  assert.equal((await owner.call(endpoint)).data.account, null);
+  assert.equal((await viewer.post(endpoint, body)).status, 403);
+  assert.equal((await dispatcher.post(endpoint, body)).status, 403);
+  assert.equal((await customer.post(endpoint, body)).status, 401);
+  assert.equal((await owner.post(endpoint, { ...body, password: 'short' })).status, 422);
+  assert.equal((await owner.post(endpoint, { ...body, role: 'owner' })).status, 422);
+  assert.equal((await owner.post(endpoint, body, { withoutCsrf: true })).status, 403);
+  assert.equal((await owner.post(endpoint, body)).status, 201);
+  assert.deepEqual((await owner.call(endpoint)).data.account, { username: body.username, enabled: true, version: 1 });
+  assert.equal((await owner.post(endpoint, { ...body, username: 'tech-duplicate' })).status, 409);
+  assert.equal((await owner.post('/admin/technicians/' + b._id + '/account', { ...body, username: 'owner' })).status, 409);
+  const stored = await db.adminUsers.findOne({ _id: body.username });
+  assert.notEqual(stored.passwordHash, body.password);
+  assert.equal(await bcrypt.compare(body.password, stored.passwordHash), true);
+  const tech = client(base);
+  await tech.call('/bootstrap');
+  assert.equal((await tech.post('/admin/login', body)).status, 200);
+  assert.equal((await tech.call('/admin/me')).data.user.role, 'technician');
+  for (const path of ['/admin/requests', '/admin/queue-updates', '/admin/config', '/admin/audit', '/admin/reports', '/admin/technician-workload', endpoint]) {
+    assert.equal((await tech.call(path)).status, 403, path);
+  }
+  assert.equal((await owner.call('/admin/technicians/' + a._id, { method: 'PATCH', body: { ...a, active: false, version: 1 } })).status, 200);
+  assert.equal((await tech.call('/admin/me')).status, 200, 'Availability and sign-in permission are separate');
+  assert.equal((await owner.call(endpoint, { method: 'PATCH', body: { version: 1, enabled: false } })).status, 200);
+  assert.equal((await tech.call('/admin/me')).status, 401);
+  assert.equal((await tech.post('/admin/login', body)).status, 401);
+  assert.equal((await owner.call(endpoint, { method: 'PATCH', body: { version: 1, enabled: true } })).status, 409);
+  const newPassword = 'ReplacementTech1234';
+  assert.equal((await owner.call(endpoint, { method: 'PATCH', body: { version: 2, enabled: true, password: newPassword } })).status, 200);
+  assert.equal((await tech.post('/admin/login', body)).status, 401);
+  assert.equal((await tech.post('/admin/login', { username: body.username, password: newPassword })).status, 200);
+  assert.deepEqual(await db.adminUsers.findOne({ _id: 'owner' }), original);
+});
+
+test('technicians access only their own jobs and photos, and versioned work updates retain email and tracking behavior', { timeout: 30000 }, async (t) => {
+  const { db, owner, dispatcher, customer, viewer, base } = await fixture(t);
+  const a = (await owner.post('/admin/technicians', { name: 'Own jobs A' })).data.technician;
+  const b = (await owner.post('/admin/technicians', { name: 'Own jobs B' })).data.technician;
+  const password = 'SyntheticTech1234';
+  const passwordHash = await bcrypt.hash(password, 4);
+  await db.adminUsers.insertMany([['tech-a', a], ['tech-b', b]].map(([username, tech]) => ({
+    _id: username, role: 'technician', technician_id: tech._id, enabled: true, passwordHash, authVersion: 1, failedLogins: 0, lockedUntil: null,
+  })));
+  const techA = client(base), techB = client(base);
+  for (const [username, browser] of [['tech-a', techA], ['tech-b', techB]]) {
+    await browser.call('/bootstrap');
+    assert.equal((await browser.post('/admin/login', { username, password })).status, 200);
+  }
+  const receipt = (await customer.post('/requests', { ...input, consent_status_email: true, notification_email: 'driver@example.test' }, { draft: randomUUID() })).data;
+  let row = await db.requests.findOne({ public_code: receipt.code });
+  const photoId = randomUUID(), otherPhotoId = randomUUID();
+  await db.requests.updateOne({ _id: row._id }, { $set: { technician: { id: a._id, name: a.name }, photos: [{ upload_id: photoId, label: 'vehicle', content: Buffer.from('synthetic-photo') }] } });
+  const other = { ...row, _id: randomUUID(), public_code: 'LN-OTHERJOB', technician: { id: b._id, name: b.name }, photos: [{ upload_id: otherPhotoId, label: 'vehicle', content: Buffer.from('other-photo') }] };
+  await db.requests.insertOne(other);
+  assert.deepEqual((await techA.call('/admin/technician/requests?technician=' + b._id)).data.requests.map((item) => item._id), [row._id]);
+  assert.equal((await techA.call('/admin/technician/requests/' + other._id)).status, 404);
+  assert.equal((await techA.call('/admin/technician/requests/' + other._id, { method: 'PATCH', body: { version: 1, status: 'in_progress' } })).status, 404);
+  assert.equal((await viewer.call('/admin/technician/requests')).status, 403);
+  const safe = (await techA.call('/admin/technician/requests/' + row._id)).data.request;
+  for (const field of ['tracking_token_hash', 'fingerprint', 'notification_email', 'email_outbox', 'assignment_history', 'final_bill_note']) assert.equal(safe[field], undefined, field);
+  assert.equal(safe.photos[0].content, undefined);
+  assert.equal((await techA.call('/admin/technician/photos/' + photoId)).status, 200);
+  assert.equal((await techA.call('/admin/technician/photos/' + otherPhotoId)).status, 404);
+  assert.equal((await techA.call('/admin/photos/' + photoId)).status, 403);
+  const endpoint = '/admin/technician/requests/' + row._id;
+  for (const change of [{ status: 'completed' }, { technician_id: b._id }, { final_bill_note: 'Not allowed' }, { customer_name: 'Not allowed' }]) {
+    assert.equal((await techA.call(endpoint, { method: 'PATCH', body: { version: row.version, ...change } })).status, 422);
+  }
+  const eta = new Date(Date.now() + 40 * 60000).toISOString();
+  assert.equal((await techA.call(endpoint, { method: 'PATCH', body: { version: row.version, arrival_eta: eta, technician_notes: 'Inspection planned' } })).status, 200);
+  row = await db.requests.findOne({ _id: row._id });
+  const keys = { code: receipt.code, token: receipt.tracking_token };
+  assert.equal((await customer.post('/requests/lookup', keys)).data.arrival_eta, eta);
+  const concurrent = await Promise.all([0, 1].map(() => techA.call(endpoint, { method: 'PATCH', body: { version: row.version, status: 'in_progress' } })));
+  assert.deepEqual(concurrent.map((result) => result.status).sort(), [200, 409]);
+  row = await db.requests.findOne({ _id: row._id });
+  assert.equal(row.history.at(-1).actor, 'tech-a');
+  assert.equal(row.email_outbox.length, 1);
+  assert.equal((await techA.call(endpoint, { method: 'PATCH', body: { version: row.version, status: 'completed' } })).status, 200);
+  row = await db.requests.findOne({ _id: row._id });
+  assert.equal(row.arrival_eta, null);
+  assert.equal(row.email_outbox.length, 2);
+  assert.equal((await customer.post('/requests/lookup', keys)).data.arrival_eta, null);
+  assert.equal((await techA.call(endpoint, { method: 'PATCH', body: { version: row.version, technician_notes: 'Closed edit' } })).status, 409);
+  const reassigned = { ...row, _id: randomUUID(), public_code: 'LN-REASSIGN', version: 1, status: 'confirmed', arrival_eta: new Date(eta), email_outbox: [] };
+  await db.requests.insertOne(reassigned);
+  assert.equal((await dispatcher.call('/admin/requests/' + reassigned._id, { method: 'PATCH', body: { version: 1, technician_id: b._id } })).status, 200);
+  assert.equal((await techA.call('/admin/technician/requests/' + reassigned._id)).status, 404);
+  assert.equal((await techA.call('/admin/technician/requests/' + reassigned._id, { method: 'PATCH', body: { version: 1, status: 'in_progress' } })).status, 404);
+  assert.equal((await techB.call('/admin/technician/requests/' + reassigned._id)).status, 200);
+  assert.equal((await db.requests.findOne({ _id: reassigned._id })).arrival_eta, null);
+});
+
+test('staff arrival estimates validate time and assignment, remain private and clear on reassignment or closing', { timeout: 25000 }, async (t) => {
+  const { db, customer, owner, dispatcher, viewer } = await fixture(t);
+  const a = (await owner.post('/admin/technicians', { name: 'ETA technician A' })).data.technician;
+  const b = (await owner.post('/admin/technicians', { name: 'ETA technician B' })).data.technician;
+  const receipt = (await customer.post('/requests', input, { draft: randomUUID() })).data;
+  let row = await db.requests.findOne({ public_code: receipt.code });
+  const endpoint = '/admin/requests/' + row._id;
+  const save = (fields, browser = dispatcher) => browser.call(endpoint, { method: 'PATCH', body: { version: row.version, ...fields } });
+  const eta = new Date(Date.now() + 30 * 60000).toISOString();
+  assert.equal((await save({ arrival_eta: eta })).status, 422);
+  assert.equal((await save({ technician_id: a._id, status: 'confirmed', arrival_eta: eta })).status, 200);
+  row = await db.requests.findOne({ _id: row._id });
+  assert.equal((await save({ arrival_eta: null }, viewer)).status, 403);
+  for (const value of [false, {}, [], 'not-a-date', '2026-02-30T10:00:00Z', '2026-11-14T10:00:00+06:00', new Date(Date.now() - 3600000).toISOString(), new Date(Date.now() + 49 * 3600000).toISOString()]) {
+    assert.equal((await save({ arrival_eta: value })).status, 422, String(value));
+  }
+  assert.equal((await customer.post('/requests/lookup', { code: receipt.code, token: 'incorrect' })).status, 404);
+  assert.equal((await customer.post('/requests/lookup', { code: receipt.code, token: receipt.tracking_token })).data.arrival_eta, eta);
+  const passed = new Date(Date.now() - 3600000);
+  await db.requests.updateOne({ _id: row._id }, { $set: { arrival_eta: passed } });
+  assert.equal((await save({ arrival_eta: passed.toISOString(), technician_notes: 'Keep existing estimate while reviewing' })).status, 200);
+  row = await db.requests.findOne({ _id: row._id });
+  assert.equal((await save({ technician_id: b._id, arrival_eta: eta })).status, 200);
+  row = await db.requests.findOne({ _id: row._id });
+  assert.equal(row.arrival_eta.toISOString(), eta);
+  assert.equal((await save({ technician_id: a._id })).status, 200);
+  row = await db.requests.findOne({ _id: row._id });
+  assert.equal(row.arrival_eta, null);
+  assert.equal((await save({ arrival_eta: eta })).status, 200);
+  row = await db.requests.findOne({ _id: row._id });
+  assert.equal((await save({ status: 'completed', arrival_eta: eta })).status, 422);
+  assert.equal((await save({ status: 'cancelled' })).status, 200);
+  row = await db.requests.findOne({ _id: row._id });
+  assert.equal(row.arrival_eta, null);
+  assert.equal(row.email_outbox, undefined);
+});
+
+test('delivery checks are staff-only, read provider status safely, rate-limit duplicates and preserve request versions', { timeout: 25000 }, async (t) => {
+  const providerId = randomUUID();
+  let calls = 0, event = 'delivered';
+  const { db, owner, dispatcher, viewer, customer } = await fixture(t, { deliveryFetcher: async (url, options) => {
+    calls++;
+    assert.equal(url, 'https://api.resend.com/emails/' + providerId);
+    assert.equal(options.method, 'GET');
+    assert.equal(options.headers.Authorization, 'Bearer ' + email.key);
+    assert.equal(options.redirect, 'error');
+    assert.equal(options.body, undefined);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    return Response.json({ id: providerId, last_event: event, html: 'private-provider-content', to: ['driver@example.test'] });
+  } });
+  const receipt = (await customer.post('/requests', { ...input, consent_status_email: true, notification_email: 'driver@example.test' }, { draft: randomUUID() })).data;
+  let row = await db.requests.findOne({ public_code: receipt.code });
+  assert.equal((await dispatcher.call('/admin/requests/' + row._id, { method: 'PATCH', body: { version: row.version, status: 'confirmed' } })).status, 200);
+  row = await db.requests.findOne({ _id: row._id });
+  const job = row.email_outbox[0];
+  const endpoint = '/admin/requests/' + row._id + '/emails/' + job.id + '/delivery';
+  assert.equal((await owner.post(endpoint, {})).status, 409);
+  assert.equal(calls, 0);
+  await processEmailJob(db, { email, fetcher: async () => Response.json({ id: providerId }) });
+  assert.equal((await viewer.post(endpoint, {})).status, 403);
+  assert.equal((await customer.post(endpoint, {})).status, 401);
+  assert.equal((await owner.post(endpoint, {}, { withoutCsrf: true })).status, 403);
+  const checked = await owner.post(endpoint, {});
+  assert.equal(checked.status, 200);
+  assert.equal(checked.data.delivery.event, 'delivered');
+  assert.equal(calls, 1);
+  assert.equal((await dispatcher.post(endpoint, {})).status, 429);
+  assert.equal(calls, 1);
+  let saved = await db.requests.findOne({ _id: row._id });
+  assert.equal(saved.version, row.version);
+  assert.equal(saved.email_outbox[0].state, 'accepted');
+  assert.doesNotMatch(JSON.stringify(saved), /private-provider-content/);
+  assert.doesNotMatch(JSON.stringify(checked.data), /synthetic-email-key|driver@example/);
+  await db.requests.updateOne({ _id: row._id }, { $unset: { 'email_outbox.0.delivery_next_check_at': '' } });
+  event = 'bounced';
+  const concurrent = await Promise.all([owner.post(endpoint, {}), dispatcher.post(endpoint, {})]);
+  assert.deepEqual(concurrent.map((result) => result.status).sort(), [200, 429]);
+  assert.equal(calls, 2);
+  saved = (await viewer.call('/admin/requests/' + row._id)).data.request;
+  assert.equal(saved.email_outbox[0].delivery.event, 'bounced');
+  assert.equal(saved.email_outbox[0].payload, undefined);
+});
+
+test('provider lookup failures keep the last confirmed delivery and deleting during a lookup cannot restore data', { timeout: 25000 }, async (t) => {
+  const { db } = await fixture(t);
+  const providerId = randomUUID(), jobId = randomUUID(), requestId = randomUUID();
+  const start = Date.now();
+  await db.requests.insertOne({ _id: requestId, public_code: 'LN-DELIVERY', state: 'submitted', version: 5, email_outbox: [{
+    id: jobId, state: 'accepted', provider_id: providerId, delivery: { event: 'delivered', checked_at: new Date(start - 1000) },
+  }] });
+  const cases = [
+    [async () => Response.json({ secret: email.key }, { status: 403 }), 'email_delivery_http_403'],
+    [async () => Response.json({}, { status: 429 }), 'email_delivery_http_429'],
+    [async () => Response.json({ id: 'wrong-id', last_event: 'delivered' }), 'email_delivery_invalid_response'],
+    [async () => Response.json({ id: providerId, last_event: 'not-supported' }), 'email_delivery_invalid_response'],
+    [async () => new Response('{broken', { headers: { 'Content-Type': 'application/json' } }), 'email_delivery_invalid_response'],
+    [async () => { throw new Error(email.key); }, 'email_delivery_network'],
+    [async () => { const e = new Error(email.key); e.name = 'TimeoutError'; throw e; }, 'email_delivery_timeout'],
+  ];
+  for (const [index, [fetcher, code]] of cases.entries()) {
+    await assert.rejects(checkEmailDelivery(db, requestId, jobId, { email, fetcher, now: new Date(start + index * 31000) }), (error) => error.code === code && !error.message.includes(email.key));
+    const row = await db.requests.findOne({ _id: requestId });
+    assert.equal(row.email_outbox[0].delivery.event, 'delivered');
+    assert.equal(row.email_outbox[0].delivery_error, code);
+    assert.equal(row.version, 5);
+  }
+  await assert.rejects(checkEmailDelivery(db, requestId, jobId, { email, now: new Date(start + 7 * 31000), fetcher: async () => {
+    await deleteRequest(db, requestId);
+    return Response.json({ id: providerId, last_event: 'delivered' });
+  } }), (error) => error.code === 'conflict');
+  const deleted = await db.requests.findOne({ _id: requestId });
+  assert.equal(deleted.state, 'deleted');
+  assert.equal(deleted.email_outbox, undefined);
 });

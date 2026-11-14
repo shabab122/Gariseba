@@ -5,6 +5,8 @@ const { clean, normalizePhone } = require('../lib/validate');
 const { HttpError } = require('../lib/http');
 const { requestReport, reportCsv } = require('../lib/reports');
 const { technicianWorkload } = require('../lib/technician-workload');
+const { technicianAccountRoutes } = require('./technician-accounts');
+const { checkEmailDelivery } = require('../lib/email-delivery');
 const sec = require('../lib/security');
 
 function technicianFields(body = {}) {
@@ -17,9 +19,15 @@ function technicianFields(body = {}) {
   return { name, phone, active: body.active !== false };
 }
 
-function operationRoutes(db) {
+function operationRoutes(db, { email, deliveryFetcher, limits }) {
   const router = express.Router();
   const role = (name) => sec.requireAdmin(db, name);
+  router.use(technicianAccountRoutes(db, limits));
+  router.post('/requests/:id/emails/:emailId/delivery', role('dispatcher'), limits.emailDelivery, async (req, res) => {
+    const result = await checkEmailDelivery(db, req.params.id, req.params.emailId, { email, fetcher: deliveryFetcher });
+    await sec.audit(db, req, req.admin.username, 'email_delivery_checked', req.params.id);
+    res.json(result);
+  });
   router.get('/technician-workload', async (req, res) => res.json(await technicianWorkload(db)));
   router.get('/technicians', async (req, res) => {
     const technicians = await db.technicians.find({}, { projection: { name: 1, phone: 1, active: 1, version: 1 } })

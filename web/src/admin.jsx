@@ -10,6 +10,8 @@ import { Technicians } from './admin-technicians.jsx';
 import { Reports } from './admin-reports.jsx';
 import { RequestEmails } from './admin-emails.jsx';
 import { TechnicianWorkload } from './admin-workload.jsx';
+import { TechnicianPortal } from './technician-portal.jsx';
+import { ArrivalEtaField, dhakaEtaInput, etaRequestValue } from './arrival-eta.jsx';
 import { ThemeButton } from './layout.jsx';
 import { Alert, Brand, Checkbox, dateTime, Dialog, Field, Status } from './ui.jsx';
 
@@ -259,6 +261,7 @@ function UpdateRequest({ row, role, refresh, back }) {
   const [resolve, setResolve] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [technicianId, setTechnicianId] = useState(row.technician?.id || '');
+  const [eta, setEta] = useState(dhakaEtaInput(row.arrival_eta));
   const [technicians, setTechnicians] = useState(null);
   const [technicianError, setTechnicianError] = useState('');
   const [technicianReload, setTechnicianReload] = useState(0);
@@ -281,12 +284,13 @@ function UpdateRequest({ row, role, refresh, back }) {
         version: row.version, status, technician_notes: notes, final_bill_note: bill,
         correction_requested: resolve ? false : undefined,
         technician_id: technicianId !== (row.technician?.id || '') ? technicianId : undefined,
+        arrival_eta: eta !== dhakaEtaInput(row.arrival_eta) ? etaRequestValue(eta) : undefined,
       } });
     }}>
-      <Field label="Request status" id="staff-status"><select id="staff-status" value={status} disabled={!canEdit} onChange={(event) => setStatus(event.target.value)}>
+      <Field label="Request status" id="staff-status"><select id="staff-status" value={status} disabled={!canEdit} onChange={(event) => { setStatus(event.target.value); if (!['received', 'confirmed', 'in_progress'].includes(event.target.value)) setEta(''); }}>
         {Object.entries(statusNames).map(([key, value]) => <option value={key} key={key}>{value}</option>)}
       </select></Field>
-      <Field label="Assigned technician" id="staff-technician"><select id="staff-technician" value={technicianId} disabled={!canEdit || !technicians} onChange={(event) => setTechnicianId(event.target.value)}>
+      <Field label="Assigned technician" id="staff-technician"><select id="staff-technician" value={technicianId} disabled={!canEdit || !technicians} onChange={(event) => { setTechnicianId(event.target.value); setEta(''); }}>
         <option value="">Unassigned</option>
         {row.technician && !technicians?.some((item) => item._id === row.technician.id) &&
           <option value={row.technician.id} disabled>{row.technician.name}</option>}
@@ -294,6 +298,7 @@ function UpdateRequest({ row, role, refresh, back }) {
       </select></Field>
       {technicianError && <Alert>{technicianError} <button type="button" className="text-link" onClick={() => setTechnicianReload((value) => value + 1)}>Refresh technicians</button></Alert>}
       {canEdit && technicians?.length === 0 && <p className="muted text-sm">An owner can add technicians from the Technicians section.</p>}
+      <ArrivalEtaField id="staff-arrival-eta" value={eta} onChange={setEta} disabled={!canEdit || !technicianId || !['received', 'confirmed', 'in_progress'].includes(status)} />
       <Field label="Internal technician notes" id="staff-notes"><textarea id="staff-notes" maxLength={4000} rows={4} value={notes} readOnly={!canEdit} onChange={(event) => setNotes(event.target.value)} /></Field>
       <Field label="Final bill note (visible to customer when completed)" id="staff-bill"><textarea id="staff-bill" maxLength={4000} rows={4} value={bill} readOnly={!canEdit} onChange={(event) => setBill(event.target.value)} /></Field>
       {row.correction_requested && canEdit && <Checkbox checked={resolve} onChange={(event) => setResolve(event.target.checked)}>Mark the correction as reviewed</Checkbox>}
@@ -433,6 +438,7 @@ export default function Admin() {
   }
   if (user === undefined) return <main className="container-wide py-12"><Brand staff /><p className="muted mt-5" role="status">Opening the staff portal…</p></main>;
   if (!user) return <Login onLogin={setUser} />;
+  if (user.role === 'technician') return <TechnicianPortal user={user} logout={logout} loggingOut={loggingOut} logoutError={error} />;
 
   const sections = [['queue', 'Requests', ClipboardList]];
   if (user.role === 'owner') sections.push(
