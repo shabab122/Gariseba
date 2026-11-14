@@ -134,6 +134,7 @@ export default function Track() {
       <p className="muted text-sm">{t.updated} · <time dateTime={data.updated_at}>{dateTime(data.updated_at, lang, 'medium')}</time></p>
       {autoRefresh && <p className="muted text-sm">{t.trackAutoRefresh}</p>}
       {refreshError && <Alert kind="warning">{refreshError}</Alert>}
+      {data.arrival_eta && <div className="bill-note"><h3>{t.etaTitle}</h3><p><time dateTime={data.arrival_eta}>{dateTime(data.arrival_eta, lang)}</time></p><p className="muted text-sm">{new Date(data.arrival_eta) < new Date() ? t.etaPassed : t.etaNote}</p></div>}
       <p className="muted">{t.live}</p>
       <h3>{t.statusHistory}</h3>
       <ol className="timeline">

@@ -2,6 +2,7 @@ import { useMutation } from './admin-config.jsx';
 import { Alert, dateTime } from './ui.jsx';
 
 const labels = { pending: 'Queued', sending: 'Sending', accepted: 'Accepted by email service', failed: 'Failed', cancelled: 'Cancelled' };
+const deliveryLabels = { sent: 'Sent by provider', delivered: 'Delivered to recipient mail server', delivery_delayed: 'Delivery delayed', bounced: 'Bounced', failed: 'Delivery failed', complained: 'Spam complaint reported', opened: 'Opened reported by provider', clicked: 'Link click reported by provider', suppressed: 'Suppressed', queued: 'Queued by provider', scheduled: 'Scheduled by provider', canceled: 'Cancelled by provider' };
 
 export function RequestEmails({ row, role, refresh }) {
   const mutation = useMutation(refresh);
@@ -16,6 +17,9 @@ export function RequestEmails({ row, role, refresh }) {
     <ul className="note-list">{jobs.slice().reverse().map((job) => <li key={job.id}>
       <strong className="block">{labels[job.state] || job.state} · {job.status.replaceAll('_', ' ')}</strong>
       <small className="block">{dateTime(job.created_at)}</small>
+      {job.delivery && <p className="mt-2 text-sm"><strong>{deliveryLabels[job.delivery.event] || 'Delivery result unavailable'}</strong><small className="block">Checked {dateTime(job.delivery.checked_at, 'en', 'medium')}</small></p>}
+      {job.delivery_error && <p className="muted text-sm">Delivery check code <code>{job.delivery_error}</code></p>}
+      {job.state === 'accepted' && role !== 'viewer' && <button type="button" className="text-link mt-2" disabled={mutation.busy} onClick={() => mutation.submit('/admin/requests/' + row._id + '/emails/' + job.id + '/delivery', { method: 'POST', body: {} })}>Check delivery</button>}
       {job.last_error && <p className="text-sm">Result code <code>{job.last_error}</code></p>}
       {job.state === 'pending' && job.attempts > 0 && <p className="muted text-sm">Next retry {dateTime(job.next_attempt_at, 'en', 'medium')}</p>}
       {job.state === 'failed' && row.consent_status_email && role !== 'viewer' && new Date(job.expires_at) > new Date() &&

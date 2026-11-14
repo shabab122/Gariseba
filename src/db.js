@@ -28,6 +28,7 @@ async function connectDatabase({ uri = config.mongoUri, dbName = config.mongoDb 
       collections.audit.createIndex({ at: -1 }),
       collections.audit.createIndex({ event: 1 }),
       collections.technicians.createIndex({ active: 1, name: 1 }),
+      collections.adminUsers.createIndex({ technician_id: 1 }, { unique: true, partialFilterExpression: { role: 'technician', technician_id: { $type: 'string' } } }),
     ]);
     return { client, db, ...collections };
   } catch (error) {

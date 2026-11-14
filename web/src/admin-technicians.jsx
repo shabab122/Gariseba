@@ -3,6 +3,7 @@ import { Plus, Save } from 'lucide-react';
 import { api } from './api.js';
 import { useMutation } from './admin-config.jsx';
 import { Alert, Checkbox, Field } from './ui.jsx';
+import { TechnicianAccount } from './technician-account.jsx';
 
 const blank = { name: '', phone: '', active: true };
 
@@ -11,6 +12,7 @@ export function Technicians() {
   const [editing, setEditing] = useState(null);
   const [error, setError] = useState('');
   const [reload, setReload] = useState(0);
+  const [accountFor, setAccountFor] = useState(null);
   const mutation = useMutation(() => {
     setEditing(null);
     setReload((value) => value + 1);
@@ -47,12 +49,14 @@ export function Technicians() {
       </form>}
       {rows === null && !error && <p className="muted" role="status">Loading technicians…</p>}
       {rows?.length === 0 && <p className="muted">Add a technician to start assigning requests.</p>}
-      {rows?.length > 0 && <ul className="config-list">{rows.map((row) => <li key={row._id}>
-        <div><strong>{row.name}</strong>{row.phone && <small>{row.phone}</small>}</div>
-        <div className="flex items-center gap-2"><span className="badge">{row.active ? 'Active' : 'Inactive'}</span>
+      {rows?.length > 0 && <ul className="config-list">{rows.map((row) => <li key={row._id} className="flex-wrap">
+        <div className="min-w-0 [overflow-wrap:anywhere]"><strong>{row.name}</strong>{row.phone && <small>{row.phone}</small>}</div>
+        <div className="flex flex-wrap items-center gap-2"><span className="badge">{row.active ? 'Active' : 'Inactive'}</span>
+          <button type="button" className="btn btn-quiet" onClick={() => setAccountFor(row)}>Login account</button>
           <button type="button" className="btn btn-quiet" onClick={() => setEditing(row)}>Edit</button>
         </div>
       </li>)}</ul>}
     </section>
+    {accountFor && <TechnicianAccount technician={accountFor} close={() => setAccountFor(null)} />}
   </>;
 }

@@ -8,7 +8,7 @@ const submitted = { state: 'submitted' };
 const statusHistory = (row) => row.history.map(({ status, created_at }) => ({ status, created_at }));
 const publicProjection = {
   _id: 1, public_code: 1, tracking_token_hash: 1, status: 1, language: 1, request_type: 1,
-  created_at: 1, updated_at: 1, history: 1, final_bill_note: 1, version: 1, consent_status_email: 1,
+  created_at: 1, updated_at: 1, history: 1, final_bill_note: 1, version: 1, consent_status_email: 1, arrival_eta: 1,
 };
 
 function draftRef(req) {
@@ -40,6 +40,7 @@ function trackView(row, lang) {
     final_bill_note: row.status === 'completed' ? row.final_bill_note : null,
     history: statusHistory(row), liveTracking: 'unavailable',
     emailUpdates: row.consent_status_email === true,
+    arrival_eta: ['received', 'confirmed', 'in_progress'].includes(row.status) ? row.arrival_eta || null : null,
   };
 }
 

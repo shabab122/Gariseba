@@ -92,7 +92,7 @@ function makeLimits() {
   return {
     general: limiter(1, 220), submit: limiter(15, 15), upload: limiter(10, 30),
     chat: limiter(5, 30), lookup: limiter(15, 25), login: limiter(15, 12), admin: limiter(1, 160),
-    aiTest: limiter(1, 3),
+    aiTest: limiter(1, 3), technicianAccount: limiter(15, 12), emailDelivery: limiter(1, 12),
   };
 }
 
@@ -100,14 +100,19 @@ const roleRank = { viewer: 1, dispatcher: 2, owner: 3 };
 function requireAdmin(db, role = 'viewer') {
   return async (req, res, next) => {
     const admin = req.session?.admin;
-    const row = admin && await db.adminUsers.findOne({ _id: admin.id }, { projection: { role: 1, authVersion: 1 } });
-    if (!row || row.authVersion !== admin.authVersion || !Object.hasOwn(roleRank, row.role)) {
+    const row = admin && await db.adminUsers.findOne({ _id: admin.id }, { projection: { role: 1, authVersion: 1, technician_id: 1, enabled: 1 } });
+    if (!row || row.authVersion !== admin.authVersion || (!Object.hasOwn(roleRank, row.role) && row.role !== 'technician')) {
       return res.status(401).json({ error: 'auth', message: 'Sign in to continue.' });
     }
-    if (roleRank[row.role] < roleRank[role]) {
+    if (row.role === 'technician' && (row.enabled === false || typeof row.technician_id !== 'string' ||
+        !await db.technicians.findOne({ _id: row.technician_id }, { projection: { _id: 1 } }))) {
+      return res.status(401).json({ error: 'auth', message: 'Sign in to continue.' });
+    }
+    if ((row.role === 'technician' ? 0 : roleRank[row.role]) < (role === 'technician' ? 0 : roleRank[role])) {
       return res.status(403).json({ error: 'forbidden', message: 'Your role cannot perform this action.' });
     }
     req.admin = { username: row._id, role: row.role };
+    if (row.role === 'technician') req.admin.technicianId = row.technician_id;
     next();
   };
 }
