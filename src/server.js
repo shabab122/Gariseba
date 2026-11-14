@@ -11,8 +11,9 @@ const { adminRoutes } = require('./routes/admin');
 const { HttpError } = require('./lib/http');
 const sec = require('./lib/security');
 const { startEmailWorker } = require('./lib/notifications');
+const { defaultSms, startSmsWorker } = require('./lib/sms');
 
-function createApp(db, { analyzer, aiConnectionTest, email = config.email, deliveryFetcher = fetch } = {}) {
+function createApp(db, { analyzer, aiConnectionTest, email = config.email, deliveryFetcher = fetch, sms = defaultSms, smsFetcher = fetch } = {}) {
   const app = express();
   const limits = sec.makeLimits();
   const dist = path.join(config.root, 'dist');
@@ -46,8 +47,8 @@ function createApp(db, { analyzer, aiConnectionTest, email = config.email, deliv
     res.set('Cache-Control', 'no-store');
     next();
   }, limits.general, express.json({ limit: '50kb' }), sec.sessionMiddleware(db), sec.csrfProtect);
-  app.use('/api', publicRoutes(db, limits, analyzer, email));
-  app.use('/api/admin', adminRoutes(db, limits, aiConnectionTest, email, deliveryFetcher));
+  app.use('/api', publicRoutes(db, limits, analyzer, email, sms));
+  app.use('/api/admin', adminRoutes(db, limits, aiConnectionTest, email, deliveryFetcher, sms, smsFetcher));
   app.use('/api', (req, res) => res.status(404).json({ error: 'not_found', message: 'This endpoint does not exist.' }));
 
   app.get('/admin.html', (req, res) => res.redirect(301, '/admin'));
@@ -99,19 +100,23 @@ async function main() {
   try {
     await ensureDefaults(db);
     let stopEmailWorker = async () => {};
+    let stopSmsWorker = async () => {};
     const server = createApp(db).listen(config.port, config.host, () => {
       console.log(`GariSeba listening on http://${config.host}:${server.address().port} | /admin`);
       console.log(`Assistant: ${config.aiConfigured ? 'provider configured' : 'built-in guidance'}`);
       stopEmailWorker = startEmailWorker(db);
+      stopSmsWorker = startSmsWorker(db);
     });
     server.on('error', async (error) => {
       console.error('Could not listen:', error.code || error.name);
       await stopEmailWorker();
+      await stopSmsWorker();
       await db.client.close();
       process.exitCode = 1;
     });
     const shutdown = () => server.close(async () => {
       await stopEmailWorker();
+      await stopSmsWorker();
       await db.client.close();
     });
     process.once('SIGINT', shutdown);

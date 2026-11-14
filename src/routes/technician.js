@@ -5,6 +5,7 @@ const { STATUSES } = require('../lib/business');
 const { HttpError } = require('../lib/http');
 const { applyArrivalEta, activeStatuses } = require('../lib/arrival-eta');
 const { statusEmail, emailReady } = require('../lib/notifications');
+const { defaultSms, smsReady, statusSms } = require('../lib/sms');
 const sec = require('../lib/security');
 const missing = () => new HttpError(404, 'not_found', 'This request is no longer assigned to you.');
 const invalid = (message) => new HttpError(422, 'validation', message);
@@ -16,7 +17,7 @@ const detailProjection = {
   arrival_eta: 1, technician_notes: 1, 'photos.upload_id': 1, 'photos.label': 1,
 };
 
-function technicianRoutes(db, email) {
+function technicianRoutes(db, email, sms = defaultSms) {
   const router = express.Router();
   router.use((req, res, next) => {
     if (req.admin.role !== 'technician') throw new HttpError(403, 'forbidden', 'This section is for technician accounts.');
@@ -45,6 +46,7 @@ function technicianRoutes(db, email) {
     if (Object.keys(body).some((key) => !['version', 'status', 'technician_notes', 'arrival_eta'].includes(key))) throw invalid('Only work status, notes and arrival estimate can be changed here.');
     const row = await db.requests.findOne({ _id: req.params.id, ...own(req) }, { projection: {
       public_code: 1, status: 1, version: 1, technician: 1, arrival_eta: 1, language: 1, consent_status_email: 1, notification_email: 1,
+      consent_status_sms: 1, callback_phone: 1,
     } });
     if (!row) throw missing();
     if (body.version !== row.version || !activeStatuses.includes(row.status)) throw conflict();
@@ -66,6 +68,7 @@ function technicianRoutes(db, email) {
     if (changed) {
       change.$push = { history: { status: fields.status, actor: req.admin.username, created_at: now } };
       if (row.consent_status_email && emailReady(email)) change.$push.email_outbox = statusEmail(row, fields.status, email, now);
+      if (row.consent_status_sms && smsReady(sms)) change.$push.sms_outbox = statusSms(row, fields.status, now);
     }
     const result = await db.requests.updateOne({ _id: row._id, ...own(req), version: row.version }, change);
     if (!result.matchedCount) throw conflict();

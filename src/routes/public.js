@@ -10,6 +10,9 @@ const { processPhoto } = require('../lib/images');
 const { HttpError } = require('../lib/http');
 const { deleteRequest, draftMs, draftRef, ensureDraft, findTracked, submitted, trackView } = require('../lib/requests');
 const { emailReady } = require('../lib/notifications');
+const { defaultSms, smsReady } = require('../lib/sms');
+const { sendInvoice } = require('../lib/invoices');
+const { feedbackFields } = require('../lib/feedback');
 const sec = require('../lib/security');
 
 const { photosPerRequest, photoMaxBytes } = config.limits;
@@ -30,7 +33,7 @@ function receipt(row, token) {
   };
 }
 
-function publicRoutes(db, limits, analyze = createAnalyzer(), email = config.email) {
+function publicRoutes(db, limits, analyze = createAnalyzer(), email = config.email, sms = defaultSms) {
   const router = express.Router();
   router.get('/bootstrap', async (req, res) => {
     const csrf = sec.ensureSession(req);
@@ -38,7 +41,7 @@ function publicRoutes(db, limits, analyze = createAnalyzer(), email = config.ema
       csrf,
       business: { name: 'GariSeba', whatsappNumber: '+' + config.whatsappNumber, serviceArea: 'Dhaka' },
       ...(await pricingInfo(db)),
-      integrations: { ai: config.aiConfigured ? 'configured' : 'fallback', malwareScan: Boolean(config.clam.host), statusEmail: emailReady(email) },
+      integrations: { ai: config.aiConfigured ? 'configured' : 'fallback', malwareScan: Boolean(config.clam.host), statusEmail: emailReady(email), statusSms: smsReady(sms) },
       limits: { photoMaxMB: photoMaxBytes / (1024 * 1024), photosPerRequest },
     });
   });
@@ -115,6 +118,7 @@ function publicRoutes(db, limits, analyze = createAnalyzer(), email = config.ema
     if (value.consent_status_email && !emailReady(email)) {
       throw new HttpError(422, 'validation', 'Email updates are currently unavailable.', { errors: { notification_email: 'Email updates are currently unavailable.' } });
     }
+    if (value.consent_status_sms && !smsReady(sms)) throw new HttpError(422, 'sms_unavailable', 'SMS status updates are currently unavailable.');
     const id = draftRef(req);
     const token = sec.trackingToken(id);
     const confirm = req.body.confirm_dhaka === true;
@@ -150,6 +154,7 @@ function publicRoutes(db, limits, analyze = createAnalyzer(), email = config.ema
       safety_flag: analysis.safety, consent_at: now, created_at: now, updated_at: now, version: 1,
       history: [{ status: 'received', actor: 'customer', created_at: now }], corrections: [], correction_requested: false,
       ...(value.consent_status_email ? { email_outbox: [] } : {}),
+      ...(value.consent_status_sms ? { sms_outbox: [], sms_consent_at: now } : {}),
     };
     const condition = { _id: id, state: 'draft', expiresAt: { $gt: now } };
     if (photo_ids.length) condition['photos.upload_id'] = { $all: photo_ids };
@@ -181,6 +186,35 @@ function publicRoutes(db, limits, analyze = createAnalyzer(), email = config.ema
     res.json(trackView(row, req.body?.language ? langOf(req.body) : undefined));
   });
 
+  router.post('/requests/invoice', limits.lookup, async (req, res) => {
+    const row = await findTracked(db, req.body?.code, req.body?.token);
+    if (!row) throw missingTrack();
+    await sendInvoice(res, row);
+  });
+
+  router.post('/requests/feedback', limits.lookup, async (req, res) => {
+    const row = await findTracked(db, req.body?.code, req.body?.token);
+    if (!row) throw missingTrack();
+    const fields = feedbackFields(req.body);
+    if (row.status !== 'completed') throw new HttpError(409, 'feedback_unavailable', 'Feedback is available after the service is completed.');
+    const same = (feedback) => feedback && feedback.rating === fields.rating && feedback.comment === fields.comment;
+    if (row.feedback) {
+      if (same(row.feedback)) return res.json({ ok: true, feedback: row.feedback });
+      throw new HttpError(409, 'feedback_exists', 'Feedback has already been submitted for this request.');
+    }
+    const now = new Date();
+    const feedback = { ...fields, created_at: now };
+    const result = await db.requests.updateOne({ _id: row._id, ...submitted, status: 'completed', feedback: null,
+      tracking_token_hash: row.tracking_token_hash }, { $set: { feedback, updated_at: now }, $inc: { version: 1 } });
+    if (!result.matchedCount) {
+      const current = await findTracked(db, req.body.code, req.body.token);
+      if (current?.status === 'completed' && same(current.feedback)) return res.json({ ok: true, feedback: current.feedback });
+      throw new HttpError(409, 'conflict', 'The request changed or feedback was already submitted. Check the tracking page again.');
+    }
+    await sec.audit(db, req, 'customer', 'feedback_submitted', row.public_code);
+    res.status(201).json({ ok: true, feedback });
+  });
+
   router.post('/requests/privacy', limits.lookup, async (req, res) => {
     const row = await findTracked(db, req.body?.code, req.body?.token);
     if (!row) throw missingTrack();
@@ -198,6 +232,16 @@ function publicRoutes(db, limits, analyze = createAnalyzer(), email = config.ema
       }, { arrayFilters: [{ 'waiting.state': { $in: ['pending', 'sending'] } }] });
       if (!result.matchedCount) throw missingTrack();
       await sec.audit(db, req, 'customer', 'status_email_stopped', row.public_code);
+      return res.json({ ok: true });
+    }
+    if (req.body.action === 'stop_sms') {
+      if (!row.consent_status_sms) return res.json({ ok: true });
+      const result = await db.requests.updateOne({ _id: row._id, ...submitted }, {
+        $set: { consent_status_sms: false, sms_stopped_at: new Date(), 'sms_outbox.$[waiting].state': 'cancelled' },
+        $unset: { sms_lock_token: '', sms_lock_until: '' }, $inc: { version: 1 },
+      }, { arrayFilters: [{ 'waiting.state': { $in: ['pending', 'sending'] } }] });
+      if (!result.matchedCount) throw missingTrack();
+      await sec.audit(db, req, 'customer', 'status_sms_stopped', row.public_code);
       return res.json({ ok: true });
     }
     if (req.body.action !== 'correct') throw new HttpError(400, 'bad_action', 'Choose an action.');

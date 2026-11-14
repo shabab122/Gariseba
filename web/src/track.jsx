@@ -4,6 +4,7 @@ import { ArrowRight, BellOff, Clock3, KeyRound, LockKeyhole, NotebookPen, Search
 import { api } from './api.js';
 import { useApp } from './context.jsx';
 import { Alert, dateTime, Dialog, Field, PageIntro, Status } from './ui.jsx';
+import { CustomerAftercare } from './customer-aftercare.jsx';
 
 const activeStatuses = ['received', 'confirmed', 'in_progress'];
 const refreshIntervalMs = 60_000;
@@ -105,7 +106,8 @@ export default function Track() {
         setToken('');
       }
       if (dialog === 'stop_email') setData((current) => ({ ...current, emailUpdates: false }));
-      setNotice({ delete: t.deleted, correct: t.correctSent, stop_email: t.emailStopped }[dialog]);
+      if (dialog === 'stop_sms') setData((current) => ({ ...current, smsUpdates: false }));
+      setNotice({ delete: t.deleted, correct: t.correctSent, stop_email: t.emailStopped, stop_sms: t.smsStopped }[dialog]);
       setDialog('');
     } catch (err) { setDialogError(errorText(err)); }
     finally { setBusy(''); }
@@ -141,24 +143,26 @@ export default function Track() {
         {data.history.map((item, index) => <li key={index}><span className="timeline-dot" /><div><strong>{t.statusNames[item.status]}</strong><span>{dateTime(item.created_at, lang)}</span></div></li>)}
       </ol>
       {data.final_bill_note && <div className="bill-note"><h3>{t.bill}</h3><p>{data.final_bill_note}</p></div>}
+      <CustomerAftercare key={data.code} data={data} matched={matched} onFeedback={(feedback) => setData((current) => current?.code === data.code ? { ...current, feedback } : current)} />
       <div className="track-actions">
         <h3><LockKeyhole size={17} />{t.manage}</h3>
         <div className="flex flex-wrap gap-2">
           <button type="button" className="btn btn-outline" onClick={() => open('correct')}><NotebookPen size={17} />{t.correct}</button>
           {data.emailUpdates && <button type="button" className="btn btn-outline" onClick={() => open('stop_email')}><BellOff size={17} />{t.stopEmail}</button>}
+          {data.smsUpdates && <button type="button" className="btn btn-outline" onClick={() => open('stop_sms')}><BellOff size={17} />{t.stopSms}</button>}
           <button type="button" className="btn btn-danger-outline" onClick={() => open('delete')}><Trash2 size={17} />{t.delete}</button>
         </div>
       </div>
     </section>}
     <Link to="/request" className="text-link mt-6">{t.request}<ArrowRight size={16} /></Link>
-    {dialog && <Dialog title={{ delete: t.deleteTitle, correct: t.correct, stop_email: t.stopEmailTitle }[dialog]} description={{ delete: t.deleteBody, stop_email: t.stopEmailBody }[dialog]} onClose={() => !busy && setDialog('')}>
+    {dialog && <Dialog title={{ delete: t.deleteTitle, correct: t.correct, stop_email: t.stopEmailTitle, stop_sms: t.stopSmsTitle }[dialog]} description={{ delete: t.deleteBody, stop_email: t.stopEmailBody, stop_sms: t.stopSmsBody }[dialog]} onClose={() => !busy && setDialog('')}>
       <form className="dialog-form" onSubmit={change}>
         {dialog === 'correct' && <Field id="correction-note" label={t.correction}><textarea id="correction-note" value={note} onChange={(event) => setNote(event.target.value)} maxLength={600} rows={4} required /></Field>}
         {dialogError && <Alert>{dialogError}</Alert>}
         <div className="flex flex-wrap justify-end gap-2">
           <button className="btn btn-outline" type="button" onClick={() => setDialog('')} disabled={Boolean(busy)}>{t.cancel}</button>
           <button className={`btn ${dialog === 'delete' ? 'btn-danger' : 'btn-primary'}`} type="submit" disabled={Boolean(busy) || (dialog === 'correct' && note.trim().length < 3)}>
-            {busy ? t.sending : { delete: t.confirmDelete, correct: t.correct, stop_email: t.stopEmail }[dialog]}
+            {busy ? t.sending : { delete: t.confirmDelete, correct: t.correct, stop_email: t.stopEmail, stop_sms: t.stopSms }[dialog]}
           </button>
         </div>
       </form>

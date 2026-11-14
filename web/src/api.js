@@ -42,6 +42,27 @@ export async function api(path, { method = 'GET', body, draftKey, signal } = {},
   return data;
 }
 
+export async function downloadPdf(path, { method = 'GET', body, filename = 'gariseba-invoice.pdf' } = {}, retried = false) {
+  const headers = { Accept: 'application/pdf' };
+  if (method !== 'GET') headers['X-CSRF-Token'] = (await bootstrap()).csrf;
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  const response = await fetch('/api' + path, { method, headers, cache: 'no-store',
+    body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(30000) });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    if (response.status === 403 && data.error === 'csrf' && !retried) {
+      await bootstrap(true);
+      return downloadPdf(path, { method, body, filename }, true);
+    }
+    throw new ApiError(response.status, data);
+  }
+  if (!response.headers.get('Content-Type')?.includes('application/pdf')) throw new ApiError(502, { message: 'The bill could not be downloaded.' });
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement('a');
+  link.href = url; link.download = filename; document.body.append(link); link.click(); link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export async function uploadPhoto(file, label, draftKey, photoKey, onProgress, retried = false) {
   const { csrf } = await bootstrap();
   try {

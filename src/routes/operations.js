@@ -7,6 +7,7 @@ const { requestReport, reportCsv } = require('../lib/reports');
 const { technicianWorkload } = require('../lib/technician-workload');
 const { technicianAccountRoutes } = require('./technician-accounts');
 const { checkEmailDelivery } = require('../lib/email-delivery');
+const { checkSmsDelivery, smsReady } = require('../lib/sms');
 const sec = require('../lib/security');
 
 function technicianFields(body = {}) {
@@ -19,10 +20,24 @@ function technicianFields(body = {}) {
   return { name, phone, active: body.active !== false };
 }
 
-function operationRoutes(db, { email, deliveryFetcher, limits }) {
+function operationRoutes(db, { email, deliveryFetcher, limits, sms, smsFetcher }) {
   const router = express.Router();
   const role = (name) => sec.requireAdmin(db, name);
   router.use(technicianAccountRoutes(db, limits));
+  router.post('/requests/:id/sms/:smsId/delivery', role('dispatcher'), limits.emailDelivery, async (req, res) => {
+    res.json(await checkSmsDelivery(db, req.params.id, req.params.smsId, { sms, fetcher: smsFetcher }));
+    await sec.audit(db, req, req.admin.username, 'sms_delivery_checked', req.params.id);
+  });
+  router.post('/requests/:id/sms/:smsId/retry', role('dispatcher'), async (req, res) => {
+    if (!smsReady(sms)) throw new HttpError(503, 'sms_unavailable', 'SMS service is not configured.');
+    const now = new Date();
+    const result = await db.requests.updateOne({ _id: req.params.id, state: 'submitted', consent_status_sms: true,
+      sms_outbox: { $elemMatch: { id: req.params.smsId, state: 'failed', safe_rejected: true, attempts: { $lt: 4 }, expires_at: { $gt: now } } } },
+    { $set: { 'sms_outbox.$.state': 'pending', 'sms_outbox.$.next_attempt_at': now } });
+    if (!result.matchedCount) throw new HttpError(409, 'sms_retry', 'This SMS is not eligible for a safe retry. Refresh the details.');
+    await sec.audit(db, req, req.admin.username, 'sms_retry_requested', req.params.id);
+    res.json({ ok: true });
+  });
   router.post('/requests/:id/emails/:emailId/delivery', role('dispatcher'), limits.emailDelivery, async (req, res) => {
     const result = await checkEmailDelivery(db, req.params.id, req.params.emailId, { email, fetcher: deliveryFetcher });
     await sec.audit(db, req, req.admin.username, 'email_delivery_checked', req.params.id);

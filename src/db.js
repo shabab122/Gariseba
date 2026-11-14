@@ -22,6 +22,7 @@ async function connectDatabase({ uri = config.mongoUri, dbName = config.mongoDb 
         { key: { state: 1, 'photos.upload_id': 1 } },
         { key: { expiresAt: 1 }, expireAfterSeconds: 0 },
         { key: { state: 1, consent_status_email: 1, 'email_outbox.state': 1, 'email_outbox.next_attempt_at': 1 } },
+        { key: { state: 1, consent_status_sms: 1, 'sms_outbox.state': 1, 'sms_outbox.next_attempt_at': 1 } },
       ]),
       collections.sessions.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
       collections.pricing.createIndex({ category: 1, active: 1, min_bdt: 1 }),
