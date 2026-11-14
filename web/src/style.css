@@ -368,6 +368,12 @@ textarea { resize: vertical; }
 .staff-table { width: 100%; text-align: left; border-collapse: collapse; font-size: .86rem; }
 .staff-table th, .staff-table td { padding: 10px 12px; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
 .staff-table th { color: var(--muted); background: var(--quiet); white-space: nowrap; }
+.staff-table.workload-table { table-layout: fixed; min-width: 0; }
+.staff-table.workload-table th { white-space: normal; }
+.staff-table.workload-table th:first-child { width: 40%; }
+@media (max-width: 640px) {
+  .staff-table.workload-table th, .staff-table.workload-table td { padding: 8px 5px; font-size: .78rem; }
+}
 .staff-table td small, .table-warning { display: flex; gap: 4px; align-items: center; color: var(--muted); font-size: .77rem; }
 .table-warning { color: var(--warn-text); }
 .reference-link { white-space: nowrap; }

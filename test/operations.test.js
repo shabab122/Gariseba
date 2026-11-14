@@ -405,3 +405,110 @@ test('owner reports and CSV use inclusive Dhaka dates and expose grouped counts'
     assert.equal((await owner.call('/admin/reports' + bad)).status, 422);
   }
 });
+
+test('technician workload counts current open assignments, includes zero and inactive technicians, and follows versioned changes', { timeout: 25000 }, async (t) => {
+  const { db, customer, owner, dispatcher, viewer } = await fixture(t);
+  assert.equal((await customer.call('/admin/technician-workload')).status, 401);
+  const empty = await viewer.call('/admin/technician-workload');
+  assert.equal(empty.status, 200);
+  assert.deepEqual(empty.data.technicians, []);
+  assert.deepEqual(empty.data.unassigned, { waiting: 0, inProgress: 0, total: 0 });
+  const first = (await owner.post('/admin/technicians', { name: 'Workload technician', phone: '01700000000' })).data.technician;
+  const idle = (await owner.post('/admin/technicians', { name: 'No assigned work' })).data.technician;
+  const inactive = (await owner.post('/admin/technicians', { name: 'Inactive technician', active: false })).data.technician;
+  const unavailable = randomUUID();
+  const base = {
+    ...validateRequest(input).value, state: 'submitted', photos: [], history: [], version: 1,
+    technician: { id: first._id, name: first.name }, created_at: new Date(),
+  };
+  const rows = ['received', 'confirmed', 'in_progress', 'completed', 'cancelled', 'out_of_area'].map((status, index) => ({
+    ...base, _id: randomUUID(), public_code: 'LN-WORK' + index, status,
+  }));
+  rows.push(
+    { ...base, _id: randomUUID(), public_code: 'LN-INACTIVE', status: 'in_progress', technician: { id: inactive._id, name: inactive.name } },
+    { ...base, _id: randomUUID(), public_code: 'LN-NULL', status: 'confirmed', technician: null },
+    { ...base, _id: randomUUID(), public_code: 'LN-PROGRESS', status: 'in_progress', technician: { id: '' } },
+    { ...base, _id: randomUUID(), public_code: 'LN-UNAVAILABLE', status: 'received', technician: { id: unavailable, name: 'Saved technician name' } },
+    { ...base, _id: randomUUID(), public_code: 'LN-DELETED', status: 'received', state: 'deleted' },
+    { ...base, _id: randomUUID(), public_code: 'LN-DRAFT', status: 'in_progress', state: 'draft' },
+  );
+  const legacy = { ...base, _id: randomUUID(), public_code: 'LN-LEGACY', status: 'received' };
+  delete legacy.technician;
+  rows.push(legacy);
+  await db.requests.insertMany(rows);
+  const response = await dispatcher.call('/admin/technician-workload');
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  const workload = response.data;
+  assert.deepEqual(workload.totals, { waiting: 5, inProgress: 3, total: 8 });
+  assert.deepEqual(workload.unassigned, { waiting: 2, inProgress: 1, total: 3 });
+  const byId = Object.fromEntries(workload.technicians.map((row) => [row.id, row]));
+  assert.deepEqual([byId[first._id].waiting, byId[first._id].inProgress, byId[first._id].total], [2, 1, 3]);
+  assert.equal(byId[idle._id].total, 0);
+  assert.equal(byId[inactive._id].active, false);
+  assert.equal(byId[inactive._id].total, 1);
+  assert.equal(byId[unavailable].name, 'Saved technician name');
+  assert.equal(byId[unavailable].active, null);
+  assert.equal(byId[unavailable].total, 1);
+  assert.ok(Number.isFinite(Date.parse(workload.generatedAt)));
+  assert.ok(workload.technicians.every((row) => !Object.hasOwn(row, 'phone')));
+  assert.equal(workload.technicians.reduce((sum, row) => sum + row.total, workload.unassigned.total), workload.totals.total);
+  assert.equal((await dispatcher.call('/admin/requests/' + rows[0]._id, {
+    method: 'PATCH', body: { version: 1, technician_id: inactive._id },
+  })).status, 422);
+  assert.equal((await dispatcher.call('/admin/requests/' + rows[0]._id, {
+    method: 'PATCH', body: { version: 1, technician_id: idle._id, status: 'in_progress' },
+  })).status, 200);
+  const changed = (await viewer.call('/admin/technician-workload')).data;
+  assert.deepEqual(changed.totals, { waiting: 4, inProgress: 4, total: 8 });
+  assert.equal(changed.technicians.find((row) => row.id === first._id).total, 2);
+  assert.equal(changed.technicians.find((row) => row.id === idle._id).inProgress, 1);
+  assert.equal((await owner.call('/admin/requests/' + rows[0]._id, { method: 'DELETE' })).status, 200);
+  assert.deepEqual((await owner.call('/admin/technician-workload')).data.totals, { waiting: 4, inProgress: 3, total: 7 });
+});
+
+test('queue sorting preserves default order, prioritizes urgency with stable pagination, combines filters and validates both request methods', { timeout: 25000 }, async (t) => {
+  const { db, owner, dispatcher, viewer } = await fixture(t);
+  const technician = (await owner.post('/admin/technicians', { name: 'Sorting technician' })).data.technician;
+  const now = new Date('2026-11-13T00:00:00Z');
+  const base = {
+    ...validateRequest(input).value, customer_name: 'Sort Driver', state: 'submitted',
+    status: 'received', photos: [], created_at: now, urgency: 'urgent',
+    technician: { id: technician._id, name: technician.name },
+  };
+  const urgentCodes = Array.from({ length: 24 }, (_, index) => 'LN-SORTU' + String(index).padStart(2, '0'));
+  await db.requests.insertMany(urgentCodes.map((public_code, index) => ({
+    ...base, _id: 'sort-u' + String(index).padStart(2, '0'), public_code,
+  })).concat([
+    { ...base, _id: 'sort-n0', public_code: 'LN-OLDNORMAL', urgency: 'normal', created_at: new Date(now.getTime() - 1000) },
+    { ...base, _id: 'sort-n1', public_code: 'LN-NEWNORMAL', urgency: 'normal', created_at: new Date(now.getTime() + 1000) },
+    { ...base, _id: 'sort-n2', public_code: 'LN-NEWEST', urgency: 'normal', created_at: new Date(now.getTime() + 2000) },
+    { ...base, _id: 'sort-other', public_code: 'LN-OTHER', customer_name: 'Other Driver', request_type: 'battery', status: 'completed' },
+    { ...base, _id: 'sort-deleted', public_code: 'LN-DELETED', state: 'deleted' },
+  ]));
+  const filters = { type: 'repair', status: 'received', technician: technician._id, from: '2026-11-13', to: '2026-11-13' };
+  const query = '/admin/requests?' + new URLSearchParams(filters);
+  const defaultView = await viewer.call(query);
+  assert.equal(defaultView.status, 200);
+  assert.equal(defaultView.data.sort, 'newest');
+  assert.deepEqual(defaultView.data.requests.map((row) => row.public_code), ['LN-NEWEST', 'LN-NEWNORMAL', ...urgentCodes.slice(6).reverse()]);
+  assert.deepEqual((await viewer.call(query + '&sort=newest')).data.requests, defaultView.data.requests);
+  const oldest = await dispatcher.call(query + '&sort=oldest');
+  assert.deepEqual(oldest.data.requests.map((row) => row.public_code), ['LN-OLDNORMAL', ...urgentCodes.slice(0, 19)]);
+  const urgent = await owner.call(query + '&sort=urgent');
+  assert.deepEqual(urgent.data.requests.map((row) => row.public_code), urgentCodes.slice(0, 20));
+  assert.equal(urgent.data.hasNext, true);
+  const second = await viewer.call(query + '&sort=urgent&page=2');
+  assert.deepEqual(second.data.requests.map((row) => row.public_code), [...urgentCodes.slice(20), 'LN-OLDNORMAL', 'LN-NEWNORMAL', 'LN-NEWEST']);
+  assert.equal(second.data.hasNext, false);
+  assert.equal(new Set([...urgent.data.requests, ...second.data.requests].map((row) => row._id)).size, 27);
+  const searched = await dispatcher.post('/admin/requests/search', { ...filters, search: 'sort driver', sort: 'urgent', page: 2 });
+  assert.deepEqual(searched.data.requests, second.data.requests);
+  const exact = await viewer.call(query + '&sort=urgent&code=ln-sortu23&urgency=urgent');
+  assert.deepEqual(exact.data.requests.map((row) => row.public_code), ['LN-SORTU23']);
+  assert.ok(urgent.data.requests.every((row) => row.urgency === 'urgent' && !Object.hasOwn(row, 'queue_priority')));
+  assert.equal((await viewer.call(query + '&sort=urgent&sort=oldest')).status, 422);
+  for (const sort of ['descending', ['urgent'], { $ne: null }, null, 1]) {
+    assert.equal((await owner.post('/admin/requests/search', { ...filters, search: 'Sort Driver', sort })).status, 422);
+  }
+});

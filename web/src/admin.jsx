@@ -9,11 +9,12 @@ import { AdminConfig, useMutation } from './admin-config.jsx';
 import { Technicians } from './admin-technicians.jsx';
 import { Reports } from './admin-reports.jsx';
 import { RequestEmails } from './admin-emails.jsx';
+import { TechnicianWorkload } from './admin-workload.jsx';
 import { ThemeButton } from './layout.jsx';
 import { Alert, Brand, Checkbox, dateTime, Dialog, Field, Status } from './ui.jsx';
 
 const statusNames = { received: 'Received', confirmed: 'Confirmed', in_progress: 'In progress', completed: 'Completed', cancelled: 'Cancelled', out_of_area: 'Outside area' };
-const emptyQueueFilters = { code: '', type: '', urgency: '', from: '', to: '', technician: '' };
+const emptyQueueFilters = { code: '', type: '', urgency: '', from: '', to: '', technician: '', sort: '' };
 
 function QueueUpdates({ username, refresh, refreshed }) {
   const [total, setTotal] = useState(null);
@@ -118,7 +119,8 @@ function Queue({ username, open, refreshVersion, onLoaded }) {
   const from = params.get('from') || '';
   const to = params.get('to') || '';
   const technician = params.get('technician') || '';
-  const filters = useMemo(() => ({ code, type, urgency, from, to, technician }), [code, type, urgency, from, to, technician]);
+  const sort = params.get('sort') === 'newest' ? '' : (params.get('sort') || '');
+  const filters = useMemo(() => ({ code, type, urgency, from, to, technician, sort }), [code, type, urgency, from, to, technician, sort]);
   const [draft, setDraft] = useState(filters);
   const [searchDraft, setSearchDraft] = useState(search);
   const [technicians, setTechnicians] = useState(null);
@@ -193,6 +195,7 @@ function Queue({ username, open, refreshVersion, onLoaded }) {
         <button key={key} type="button" className="panel metric" aria-pressed={status === key} onClick={() => updateView({ status: status === key ? '' : key, page: 1 })}><span>{label}</span><strong>{data ? counts[key] || 0 : '—'}</strong><ArrowDownLeft size={17} /></button>
       )}
     </div>
+    <TechnicianWorkload refreshVersion={refreshVersion} />
     <section className="panel queue-panel">
       <form className="queue-toolbar" onSubmit={applyFilters}>
         <div className="grid w-full gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -214,6 +217,9 @@ function Queue({ username, open, refreshVersion, onLoaded }) {
             {technicians?.map((item) => <option value={item._id} key={item._id}>{item.name}{item.active ? '' : ' (inactive)'}</option>)}
           </select></Field>
           <Field id="queue-customer" label="Find customer by name or phone"><input id="queue-customer" value={searchDraft} maxLength={80} autoComplete="off" placeholder="Name or phone (3+ digits)" onChange={(event) => setSearchDraft(event.target.value)} /></Field>
+          <Field id="queue-sort" label="Sort requests"><select id="queue-sort" name="sort" value={draft.sort} onChange={editFilter}>
+            <option value="">Newest first</option><option value="oldest">Oldest first</option><option value="urgent">Urgent first</option>
+          </select></Field>
         </div>
         {technicianError && <Alert>{technicianError} <button type="button" className="text-link" onClick={() => setTechnicianReload((value) => value + 1)}>Retry technician choices</button></Alert>}
         <button type="submit" className="btn btn-outline"><Search size={17} />Apply filters</button>
@@ -226,6 +232,7 @@ function Queue({ username, open, refreshVersion, onLoaded }) {
         <table className="staff-table"><thead><tr><th scope="col">Reference</th><th scope="col">Customer & vehicle</th><th scope="col">Location</th><th scope="col">Status</th><th scope="col">Received</th></tr></thead>
           <tbody>{data.requests.map((row) => <tr key={row._id}>
             <td><button className="text-link reference-link" type="button" onClick={() => open(row._id)}>{row.public_code}<ArrowUpRight size={14} /></button>
+              {row.urgency === 'urgent' && <span className="table-warning">Urgent</span>}
               {row.safety_flag && <span className="table-warning"><TriangleAlert size={13} />Safety flag</span>}
               {row.correction_requested && <span className="table-warning">Correction requested</span>}
             </td>

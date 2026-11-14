@@ -92,9 +92,10 @@ function adminRoutes(db, limits, testConnection = testOpenAIConnection, email = 
     const code = clean(query.code, 20).toUpperCase();
     const pageValue = Number(query.page);
     const page = range(pageValue, 1, 500) ? pageValue : 1;
-    const { type = '', urgency = '', technician = '' } = query;
+    const { type = '', urgency = '', technician = '', sort = '' } = query;
     if (type !== '' && !TYPES.includes(type)) throw invalid('Choose a valid request type.');
     if (urgency !== '' && !['normal', 'urgent'].includes(urgency)) throw invalid('Choose a valid urgency.');
+    if (!['', 'newest', 'oldest', 'urgent'].includes(sort)) throw invalid('Choose a valid request order.');
     if (typeof technician !== 'string' || (technician !== '' && technician !== 'unassigned' &&
         !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(technician))) {
       throw invalid('Choose a valid technician filter.');
@@ -117,7 +118,10 @@ function adminRoutes(db, limits, testConnection = testOpenAIConnection, email = 
     }
     const [rows, stats] = await Promise.all([
       db.requests.aggregate([
-        { $match: criteria }, { $sort: { created_at: -1, _id: -1 } },
+        { $match: criteria },
+        ...(sort === 'urgent' ? [{ $set: { queue_priority: { $cond: [{ $eq: ['$urgency', 'urgent'] }, 1, 0] } } }] : []),
+        { $sort: sort === 'urgent' ? { queue_priority: -1, created_at: 1, _id: 1 }
+          : sort === 'oldest' ? { created_at: 1, _id: 1 } : { created_at: -1, _id: -1 } },
         { $skip: (page - 1) * pageSize }, { $limit: pageSize + 1 },
         { $project: {
           public_code: 1, request_type: 1, urgency: 1, status: 1, customer_name: 1,
@@ -131,7 +135,7 @@ function adminRoutes(db, limits, testConnection = testOpenAIConnection, email = 
       ]).toArray(),
     ]);
     res.json({
-      requests: rows.slice(0, pageSize), page, hasNext: rows.length > pageSize,
+      requests: rows.slice(0, pageSize), page, hasNext: rows.length > pageSize, sort: sort || 'newest',
       counts: Object.fromEntries(stats.map(({ _id, count }) => [_id, count])),
     });
   }

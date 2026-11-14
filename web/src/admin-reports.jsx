@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Download, Search } from 'lucide-react';
 import { api, ApiError } from './api.js';
 import { Alert, dateTime, Field } from './ui.jsx';
+import { ReportCharts } from './report-charts.jsx';
 
 const types = { battery: 'Battery help', repair: 'Repair', other: 'Other' };
 const statuses = { received: 'Received', confirmed: 'Confirmed', in_progress: 'In progress', completed: 'Completed', cancelled: 'Cancelled', out_of_area: 'Outside area' };
@@ -86,10 +87,7 @@ export function Reports() {
           <div><h2>Total requests</h2><p className="text-3xl font-bold" data-testid="report-total">{report.total}</p></div>
           <div><h3>Report period</h3><p>{report.from} — {report.to}</p><small className="muted">Generated {dateTime(report.generatedAt)}</small></div>
         </div>
-        <div className="field-grid">
-          <div><h3>By request type</h3><ul className="note-list">{report.byType.map((item) => <li key={item.value}>{types[item.value] || item.value} · <strong>{item.count}</strong></li>)}</ul></div>
-          <div><h3>By current status</h3><ul className="note-list">{report.byStatus.map((item) => <li key={item.value}>{statuses[item.value] || item.value} · <strong>{item.count}</strong></li>)}</ul></div>
-        </div>
+        <ReportCharts report={report} types={types} statuses={statuses} />
         {!report.rows.length && <p className="muted">No requests match this report.</p>}
         {report.rows.length > 0 && <div className="table-scroll" tabIndex={0} aria-label="Request report table">
           <table className="staff-table"><thead><tr><th scope="col">Date (Dhaka)</th><th scope="col">Type</th><th scope="col">Status</th><th scope="col">Requests</th></tr></thead>
