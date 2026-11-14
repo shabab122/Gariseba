@@ -4,6 +4,7 @@ const { randomUUID } = require('node:crypto');
 const { clean, normalizePhone } = require('../lib/validate');
 const { HttpError } = require('../lib/http');
 const { requestReport, reportCsv } = require('../lib/reports');
+const { technicianWorkload } = require('../lib/technician-workload');
 const sec = require('../lib/security');
 
 function technicianFields(body = {}) {
@@ -19,6 +20,7 @@ function technicianFields(body = {}) {
 function operationRoutes(db) {
   const router = express.Router();
   const role = (name) => sec.requireAdmin(db, name);
+  router.get('/technician-workload', async (req, res) => res.json(await technicianWorkload(db)));
   router.get('/technicians', async (req, res) => {
     const technicians = await db.technicians.find({}, { projection: { name: 1, phone: 1, active: 1, version: 1 } })
       .sort({ active: -1, name: 1, _id: 1 }).toArray();

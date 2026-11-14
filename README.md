@@ -1,8 +1,8 @@
-# GariSeba 2.4
+# GariSeba 2.5
 
 GariSeba is a bilingual roadside request and vehicle guidance app for Dhaka. The project originated as LAGBO NAKI?. It uses React, HTML, CSS and Tailwind on the frontend, Node.js and Express for the API, and MongoDB for data. The Word guide in `docs/` covers the original GariSeba setup in Bangla.
 
-## Upgrade from 2.3 on Linux
+## Upgrade from 2.4 on Linux
 
 Stop the old Node server, extract the new archive in a separate directory, and copy your existing `.env` into the new `gariseba-mern` folder. Keep its MongoDB URI, database name and secrets so your accounts, requests and tracking keys carry over. Use the same running MongoDB instance. If you configured Compose for MongoDB 7.0, use your working `compose.yaml` and volume when starting MongoDB again.
 
@@ -15,6 +15,31 @@ npm start
 ```
 
 Open the address shown in the terminal. For an existing port 3030 setup, keep `PORT=3030` and `PUBLIC_BASE_URL=http://localhost:3030` in `.env` and open [http://localhost:3030](http://localhost:3030).
+
+## Version 2.5 features
+
+| Feature | How to use it |
+| --- | --- |
+| Technician workload | Open the staff request queue. **Technician workload** shows waiting, in-progress and total open requests for each technician, plus **Unassigned**. Owners, dispatchers and viewers can read it. |
+| Queue sorting | Choose **Sort requests**, then **Apply filters**. Options are **Newest first**, **Oldest first** and **Urgent first**. Sorting combines with all existing queue filters, customer search and pagination. |
+| Report charts | As an owner, open **Reports** and apply a date range, type and current status. Charts show received-date totals, request types and current statuses using the same applied report data as the table and CSV. |
+
+The workload counts all retained submitted requests currently **Received**, **Confirmed** or **In progress**, independently of queue filters. **Waiting** combines Received and Confirmed. Completed, cancelled, outside-area, draft and deleted requests are excluded. Current assignments determine the counts. Technicians with no open work show zero, and inactive technicians keep their existing work visible. An assignment whose roster entry is unavailable keeps its saved name and counts. No technician phone or customer contact details are returned by the workload endpoint.
+
+Workload loads on opening the queue or returning from request details. Use **Refresh workload** after changes made elsewhere. **Refresh queue** reloads both the queue and workload. The panel shows the last successful update time. Workload totals describe a snapshot of current requests.
+
+Queue order is kept in the URL alongside the earlier filters and page. It survives opening a request and returning, reloading and browser Back. Changing the applied order resets to page 1. **Clear filters** restores Newest first. Urgent first puts urgent requests before normal requests, with the oldest first within each urgency. Equal received times have a stable order. The default order remains Newest first.
+
+The daily chart includes days with zero requests within the selected inclusive Dhaka dates. Type and status charts show their exact counts next to the bars. The report table retains exact grouped values for reading and CSV export. Dates represent when requests were received, and status represents their current status at report generation. Draft changes to report controls take effect after **Show report**. An empty report shows the existing empty state. Charts are rendered locally with SVG using the current report response.
+
+This upgrade uses the existing database and environment. No new credentials, dependencies or database migration are required.
+
+### Verify version 2.5
+
+1. Assign an open request to a technician, return to the queue and check the workload. Change Received to Confirmed, then In progress, then Completed. Waiting should count the first two statuses, In progress should count the third, and Completed should leave the open totals. Check Unassigned and an inactive technician as well.
+2. Apply each request order with the existing filters and customer search. Move between pages, open a request and return, reload and use browser Back. Check that urgent requests appear first and older requests lead within each urgency. Clear the filters and check Newest first.
+3. Apply a report covering several received dates, including a day with no requests. Compare the date, type and status chart counts against the table and CSV. Change draft controls before applying and confirm the displayed chart and CSV continue using the applied filters.
+4. Check the queue and charts on a narrow screen. A viewer should see workload and sorting while Reports keeps its existing owner-only access.
 
 ## Version 2.4 features
 
