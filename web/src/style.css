@@ -497,3 +497,17 @@ textarea { resize: vertical; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
 }
+
+.customer-portal { display: grid; gap: 22px; }
+.customer-portal .page-intro { margin-bottom: 0; }
+.customer-portal .record-panel { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.appointment-list { display: grid; gap: 12px; min-width: 0; }
+.appointment-card { display: grid; gap: 10px; padding: 18px; border: 1px solid var(--border); border-radius: 12px; min-width: 0; overflow-wrap: anywhere; }
+.appointment-card button { justify-self: start; }
+.payment-summary { display: grid; gap: 12px; padding: 18px; background: var(--quiet); border-radius: 12px; min-width: 0; }
+.payment-summary > .badge { justify-self: start; }
+.payment-totals { display: grid; gap: 8px; margin: 0; }
+.payment-totals > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; }
+.payment-totals dd { margin: 0; font-weight: 800; }
+.recovery-panel input { font-family: var(--mono); font-size: .85rem; min-width: 0; }
+@media (min-width: 901px) and (max-width: 1120px) { .main-nav { gap: 14px; } .main-nav > a { font-size: .84rem; } .btn-header { padding-inline: 12px; } }

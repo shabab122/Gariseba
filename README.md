@@ -1,8 +1,8 @@
-# GariSeba 2.7
+# GariSeba 2.8
 
 GariSeba is a bilingual roadside request and vehicle guidance app for Dhaka. The project originated as LAGBO NAKI?. It uses React, HTML, CSS and Tailwind on the frontend, Node.js and Express for the API, and MongoDB for data. The Word guide in `docs/` covers the original GariSeba setup in Bangla.
 
-## Upgrade from 2.6 on Linux
+## Upgrade from 2.7 on Linux
 
 Stop the old Node server, extract the new archive in a separate directory, and copy your existing `.env` into the new `gariseba-mern` folder. Keep its MongoDB URI, database name and secrets so your accounts, requests and tracking keys carry over. Use the same running MongoDB instance. If you configured Compose for MongoDB 7.0, use your working `compose.yaml` and volume when starting MongoDB again.
 
@@ -15,6 +15,40 @@ npm start
 ```
 
 Open the address shown in the terminal. For an existing port 3030 setup, keep `PORT=3030` and `PUBLIC_BASE_URL=http://localhost:3030` in `.env` and open [http://localhost:3030](http://localhost:3030).
+
+## Version 2.8 features
+
+This version adds payment status, appointment booking and customer service history to v2.7. Keep the existing `.env`, MongoDB database, port, staff accounts and AI/email/SMS keys. No new API provider or credential is needed. New database collections and indexes are created automatically at startup; existing requests are not reseeded.
+
+| Feature | Where to use it |
+| --- | --- |
+| Bill payment status | Open a completed request with an issued bill, then use **Bill payments** to record payments received or refunds given. Customers see Paid, Partially paid or Unpaid with the remaining balance in tracking, history and the downloaded PDF. |
+| Appointment booking | Owners and dispatchers publish time slots under **Appointments**. Customers use `/appointments` with their reference/tracking key, or book directly from their signed-in history. |
+| Customer history | Open **My services** at `/account`, create a separate customer account, and save its recovery code. New signed-in requests are added automatically. Use **Add an earlier request** with its reference and private tracking key to link a legacy request. |
+
+Detailed behavior, permissions and test steps are in [docs/V2.8_GUIDE.md](docs/V2.8_GUIDE.md).
+
+### Payment records
+
+Payment status is calculated from the issued bill total and recorded payments minus refunds. All amounts use integer poisha. Existing bills initially have no recorded payments; staff must enter any money already collected outside the app. A zero-total bill is Paid with a zero balance. Staff can record cash, bKash, Nagad, bank or other payments; this does not charge a provider or verify a transaction reference.
+
+A payment cannot exceed the remaining balance, and a refund cannot exceed the recorded paid amount. Entries cannot be edited or removed through the payment form; record an appropriate refund to correct a received payment. Each entry keeps its actor and timestamp. A bill cannot be revised below its paid amount until the appropriate refund is recorded. Concurrent saves use the existing request version, and retrying the same operation cannot duplicate a payment.
+
+### Appointments and accounts
+
+Each explicitly published slot lasts one hour and accepts one request. Slots start at a whole hour in Dhaka time, must be at least 30 minutes ahead, and can be published up to 90 days ahead. There is one shared schedule; hours are chosen by staff, not inferred from default business hours. An open request can hold one appointment at a time. Cancel the current reservation before selecting a different slot. Cancellation releases the slot. Staff can close an unbooked slot or reopen it. Passed appointments are read-only for customers; staff can cancel a past reservation if the still-open service needs rescheduling.
+
+Customer accounts are separate from staff accounts, even when usernames match. Passwords need at least 15 characters and at most 72 UTF-8 bytes. Registration and password changes show a private recovery code once; save it safely. The code is stored only as a hash, is replaced when used, and allows recovery without email/SMS. Changing or recovering a password invalidates older customer sessions. **Continue as a guest** clears the customer login while retaining the original guest request flow.
+
+History is limited to requests owned by the signed-in account. A phone number alone cannot find or claim history. An earlier guest request requires its original reference and tracking key, and an already linked request cannot be moved into another account. Staff login/logout can end the customer session in the same browser; customer login/logout preserves an existing staff session. Deleting an active request also removes its local bill, payment records and feedback and releases its reservation. Account credentials remain separate from request deletion, and earlier backups/downloaded copies have separate retention.
+
+### Release verification
+
+Version 2.8 passed 68 automated tests using temporary real MongoDB databases, a production build, and desktop/mobile browser checks for registration/recovery, account isolation, history, appointment publication/booking/cancellation and payment/refund balances. Earlier v2.1-v2.7 browser workflows also passed. Payment summaries and page footers were checked in short and multi-page Bengali/English PDFs. The production dependency audit reported zero known advisories at verification; no dependency versions were changed.
+
+The new features use local application records and do not send real payments or calendar invitations. Existing external AI/email/SMS verification remains subject to the provider setup described in earlier sections.
+
+All earlier v2.7 functionality remains below.
 
 ## Version 2.7 features
 

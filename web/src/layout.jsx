@@ -31,7 +31,7 @@ export function PublicLayout() {
   }, [loc.pathname, loc.hash]);
 
   const nav = [
-    ['/#services', t.services], ['/assistant', t.assistant], ['/track', t.track],
+    ['/#services', t.services], ['/assistant', t.assistant], ['/track', t.track], ['/account', t.myServices],
   ];
   const phone = config?.business.whatsappNumber;
   return <>
@@ -65,7 +65,7 @@ export function PublicLayout() {
       <div className="container-wide footer-inner">
         <div><Brand /><p>{t.footer}</p></div>
         <div className="footer-links">
-          <Link to="/privacy">{t.privacy}</Link><Link to="/admin">{t.staff}</Link>
+          <Link to="/appointments">{t.appointmentsTitle}</Link><Link to="/privacy">{t.privacy}</Link><Link to="/admin">{t.staff}</Link>
           {phone && <a href={`https://wa.me/${phone.slice(1)}`} target="_blank" rel="noreferrer">{t.whatsapp}<ArrowUpRight size={14} /></a>}
         </div>
       </div>

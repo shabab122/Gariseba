@@ -38,7 +38,7 @@ export function RequestInvoice({ row, role, refresh }) {
         version: row.version, items, discount_bdt: discount, notes,
       } });
     }}>
-      <p className="muted text-sm">Enter the agreed final charges in BDT. Saving makes the bill available to the customer. Payment confirmation is handled separately.</p>
+      <p className="muted text-sm">Enter the agreed final charges in BDT. Saving makes the bill available to the customer. Use the Bill payments panel to record money received or refunded.</p>
       {items.map((item, index) => <fieldset className="invoice-item" key={index} disabled={mutation.busy}>
         <legend>Item {index + 1}</legend>
         <Field id={'bill-description-' + index} label="Description"><input id={'bill-description-' + index} value={item.description} maxLength={140} required onChange={(event) => update(index, 'description', event.target.value)} /></Field>
