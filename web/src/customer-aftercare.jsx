@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Download, Star } from 'lucide-react';
 import { api, downloadPdf } from './api.js';
+import { PaymentSummary } from './payments.jsx';
 import { useApp } from './context.jsx';
 import { Alert, dateTime, Field } from './ui.jsx';
 
@@ -36,6 +37,7 @@ export function CustomerAftercare({ data, matched, onFeedback }) {
         <button className="btn btn-outline" type="button" disabled={Boolean(busy)} onClick={download}><Download size={17} />{busy === 'pdf' ? t.downloadingBill : t.downloadBill}</button>
       </> : <p className="muted">{t.billPending}</p>}
     </div>
+    <PaymentSummary payment={data.payment} />
     <div className="bill-note">
       <h3><Star size={18} /> {t.feedbackTitle}</h3>
       {data.feedback ? <div role="status">

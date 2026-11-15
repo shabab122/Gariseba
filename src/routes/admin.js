@@ -16,6 +16,8 @@ const { technicianRoutes } = require('./technician');
 const { applyArrivalEta } = require('../lib/arrival-eta');
 const { defaultSms, smsReady, statusSms } = require('../lib/sms');
 const { billingRoutes } = require('./billing');
+const { paymentRoutes } = require('./payments');
+const { adminAppointmentRoutes } = require('./appointments');
 const sec = require('../lib/security');
 
 const DUMMY_HASH = bcrypt.hashSync('not-a-real-gariseba-password', 12);
@@ -85,6 +87,8 @@ function adminRoutes(db, limits, testConnection = testOpenAIConnection, email = 
   router.use(role('viewer'));
   router.use(operationRoutes(db, { email, deliveryFetcher, limits, sms, smsFetcher }));
   router.use(billingRoutes(db));
+  router.use(paymentRoutes(db));
+  router.use(adminAppointmentRoutes(db));
 
   router.get('/queue-updates', async (req, res) => {
     const totalReceived = await db.audit.countDocuments({ event: 'request_created' });

@@ -138,6 +138,7 @@ export default function Track() {
       {refreshError && <Alert kind="warning">{refreshError}</Alert>}
       {data.arrival_eta && <div className="bill-note"><h3>{t.etaTitle}</h3><p><time dateTime={data.arrival_eta}>{dateTime(data.arrival_eta, lang)}</time></p><p className="muted text-sm">{new Date(data.arrival_eta) < new Date() ? t.etaPassed : t.etaNote}</p></div>}
       <p className="muted">{t.live}</p>
+      <Link className="text-link" to="/appointments" state={{ code: matched?.code, token: matched?.token }}>{t.appointmentsTitle}</Link>
       <h3>{t.statusHistory}</h3>
       <ol className="timeline">
         {data.history.map((item, index) => <li key={index}><span className="timeline-dot" /><div><strong>{t.statusNames[item.status]}</strong><span>{dateTime(item.created_at, lang)}</span></div></li>)}

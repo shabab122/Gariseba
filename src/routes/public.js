@@ -14,6 +14,7 @@ const { defaultSms, smsReady } = require('../lib/sms');
 const { sendInvoice } = require('../lib/invoices');
 const { feedbackFields } = require('../lib/feedback');
 const sec = require('../lib/security');
+const { currentCustomer, publicCustomer } = require('../lib/customers');
 
 const { photosPerRequest, photoMaxBytes } = config.limits;
 const upload = multer({
@@ -38,7 +39,7 @@ function publicRoutes(db, limits, analyze = createAnalyzer(), email = config.ema
   router.get('/bootstrap', async (req, res) => {
     const csrf = sec.ensureSession(req);
     res.json({
-      csrf,
+      csrf, customer: publicCustomer(await currentCustomer(db, req)),
       business: { name: 'GariSeba', whatsappNumber: '+' + config.whatsappNumber, serviceArea: 'Dhaka' },
       ...(await pricingInfo(db)),
       integrations: { ai: config.aiConfigured ? 'configured' : 'fallback', malwareScan: Boolean(config.clam.host), statusEmail: emailReady(email), statusSms: smsReady(sms) },
@@ -119,12 +120,15 @@ function publicRoutes(db, limits, analyze = createAnalyzer(), email = config.ema
       throw new HttpError(422, 'validation', 'Email updates are currently unavailable.', { errors: { notification_email: 'Email updates are currently unavailable.' } });
     }
     if (value.consent_status_sms && !smsReady(sms)) throw new HttpError(422, 'sms_unavailable', 'SMS status updates are currently unavailable.');
+    const customer = await currentCustomer(db, req);
+    if (req.session.customer && !customer) throw new HttpError(401, 'customer_auth', 'Your customer session expired. Sign in again or sign out to continue as a guest.');
     const id = draftRef(req);
     const token = sec.trackingToken(id);
     const confirm = req.body.confirm_dhaka === true;
     const { consent_status_email, notification_email, ...legacyValue } = value;
     const fingerprint = sec.sha256(JSON.stringify([consent_status_email ? value : legacyValue, confirm]));
     const replay = (row) => {
+      if (row.customer_id && row.customer_id !== customer?._id) throw new HttpError(409, 'already_submitted', 'Start a new request for this customer account.');
       if (row.fingerprint !== fingerprint || row.tracking_token_hash !== sec.sha256(token)) {
         throw new HttpError(409, 'already_submitted', 'This draft already has a submitted request. Retry with the original details.');
       }
@@ -148,7 +152,7 @@ function publicRoutes(db, limits, analyze = createAnalyzer(), email = config.ema
       ? null : await estimateFor(db, analysis.category, value.language);
     const now = new Date();
     const fields = {
-      ...details, state: 'submitted', status: 'received',
+      ...details, ...(customer ? { customer_id: customer._id } : {}), state: 'submitted', status: 'received',
       area_id: location.area?._id ?? null, in_service_area: location.status === 'inside',
       tracking_token_hash: sec.sha256(token), fingerprint, photos, analysis, estimate,
       safety_flag: analysis.safety, consent_at: now, created_at: now, updated_at: now, version: 1,

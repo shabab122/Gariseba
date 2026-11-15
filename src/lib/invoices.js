@@ -1,19 +1,12 @@
 'use strict';
 const path = require('node:path');
 const PDFDocument = require('pdfkit');
-const { clean, digits } = require('./validate');
+const { clean } = require('./validate');
+const { parseMoney, money } = require('./money');
+const { paymentSummary } = require('./payments');
 const { HttpError } = require('./http');
 
 const invalid = (message) => new HttpError(422, 'validation', message);
-const money = (poisha) => (poisha / 100).toFixed(2);
-
-function parseMoney(value) {
-  const text = typeof value === 'number' ? String(value) : digits(typeof value === 'string' ? value.trim() : '');
-  if (!/^\d{1,7}(?:\.\d{1,2})?$/.test(text)) throw invalid('Enter an amount with up to two decimal places.');
-  const [whole, fraction = ''] = text.split('.');
-  return Number(whole) * 100 + Number(fraction.padEnd(2, '0'));
-}
-
 function invoiceFields(body) {
   if (!body || !Array.isArray(body.items) || !body.items.length || body.items.length > 20) {
     throw invalid('Add between 1 and 20 bill items.');
@@ -47,7 +40,7 @@ function requireInvoice(row) {
   return row.invoice;
 }
 
-function renderInvoice(invoice) {
+function renderInvoice(invoice, payment) {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: 'A4', margins: { top: 48, left: 48, right: 48, bottom: 80 }, bufferPages: true,
       info: { Title: invoice.number, Author: 'GariSeba', Subject: 'Service invoice' } });
@@ -109,9 +102,15 @@ function renderInvoice(invoice) {
       doc.font('LatinBold').fontSize(17).fillColor('#11665f')
         .text('TOTAL  BDT ' + money(invoice.total_poisha), { width, align: 'right' });
       doc.moveDown();
+      if (payment) {
+        room(105);
+        text('Payment status: ' + payment.status.replaceAll('_', ' ').toUpperCase(), 12);
+        text('Recorded paid: BDT ' + money(payment.paid_poisha) + ' | Balance: BDT ' + money(payment.balance_poisha), 11);
+        doc.moveDown();
+      }
       if (invoice.notes) { room(); text('Bill notes', 12); text(invoice.notes, 10); doc.moveDown(); }
       room(45);
-      text('This invoice records the service charges. Payment confirmation is handled separately by the team.', 9);
+      text(payment ? 'Payment amounts reflect records entered by the service team. This document does not verify an online gateway transaction.' : 'This invoice records the service charges. Payment confirmation is handled separately by the team.', 9);
       const pages = doc.bufferedPageRange();
       for (let i = 0; i < pages.count; i++) {
         doc.switchToPage(i);
@@ -129,7 +128,7 @@ function renderInvoice(invoice) {
 
 async function sendInvoice(res, row) {
   const invoice = requireInvoice(row);
-  const pdf = await renderInvoice(invoice);
+  const pdf = await renderInvoice(invoice, paymentSummary(row));
   res.set({ 'Cache-Control': 'private, no-store', 'Content-Type': 'application/pdf',
     'Content-Disposition': 'attachment; filename="' + invoice.number.replace(/[^A-Za-z0-9-]/g, '') + '.pdf"' }).send(pdf);
 }

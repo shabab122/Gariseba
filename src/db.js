@@ -11,19 +11,23 @@ async function connectDatabase({ uri = config.mongoUri, dbName = config.mongoDb 
     await client.connect();
     const db = client.db(dbName);
     const collections = Object.fromEntries(
-      ['requests', 'sessions', 'adminUsers', 'settings', 'areas', 'pricing', 'audit', 'technicians']
+      ['requests', 'sessions', 'adminUsers', 'settings', 'areas', 'pricing', 'audit', 'technicians', 'customers', 'appointments']
         .map((name) => [name, db.collection(name)])
     );
     await Promise.all([
       collections.requests.createIndexes([
         { key: { public_code: 1 }, unique: true, sparse: true },
         { key: { state: 1, created_at: -1 } },
+        { key: { customer_id: 1, state: 1, created_at: -1, _id: -1 } },
         { key: { state: 1, status: 1, created_at: -1 } },
         { key: { state: 1, 'photos.upload_id': 1 } },
         { key: { expiresAt: 1 }, expireAfterSeconds: 0 },
         { key: { state: 1, consent_status_email: 1, 'email_outbox.state': 1, 'email_outbox.next_attempt_at': 1 } },
         { key: { state: 1, consent_status_sms: 1, 'sms_outbox.state': 1, 'sms_outbox.next_attempt_at': 1 } },
       ]),
+      collections.customers.createIndex({ username: 1 }, { unique: true }),
+      collections.appointments.createIndex({ starts_at: 1 }, { unique: true }),
+      collections.appointments.createIndex({ 'booking.request_id': 1 }, { unique: true, partialFilterExpression: { 'booking.request_id': { $type: 'string' } } }),
       collections.sessions.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
       collections.pricing.createIndex({ category: 1, active: 1, min_bdt: 1 }),
       collections.audit.createIndex({ at: -1 }),

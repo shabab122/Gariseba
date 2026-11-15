@@ -426,6 +426,7 @@ export default function RequestWizard() {
           {data.safety_flag && <SafetyNotice detailed />}
         </>}
         {step === 1 && <>
+          {config?.customer && <Alert kind="success">{t.accountAttached} <Link className="text-link" to="/account">{t.myServices}</Link></Alert>}
           <div className="field-grid">
             <TextField {...problemFields} name="customer_name" label={t.name} maxLength={80} autoComplete="name" required />
             <TextField {...problemFields} name="callback_phone" label={t.phone} maxLength={30} type="tel" autoComplete="tel" required />

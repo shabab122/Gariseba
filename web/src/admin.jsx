@@ -11,6 +11,8 @@ import { Reports } from './admin-reports.jsx';
 import { RequestEmails } from './admin-emails.jsx';
 import { RequestInvoice, RequestFeedback } from './admin-invoice.jsx';
 import { RequestSms } from './admin-sms.jsx';
+import { RequestPayments } from './payments.jsx';
+import { AdminAppointments } from './admin-appointments.jsx';
 import { TechnicianWorkload } from './admin-workload.jsx';
 import { TechnicianPortal } from './technician-portal.jsx';
 import { ArrivalEtaField, dhakaEtaInput, etaRequestValue } from './arrival-eta.jsx';
@@ -308,7 +310,7 @@ function UpdateRequest({ row, role, refresh, back }) {
       {canEdit && <button type="submit" className="btn btn-primary" disabled={change.busy}>{change.busy ? 'Saving…' : 'Save request'}</button>}
     </form>
     {role === 'owner' && <button className="btn btn-danger-outline" type="button" onClick={() => setRemoving(true)}><Trash2 size={17} />Delete request</button>}
-    {removing && <Dialog title="Permanently delete this request?" description="The active request, its photos and status history will be removed." onClose={() => !removal.busy && setRemoving(false)}>
+    {removing && <Dialog title="Permanently delete this request?" description="The active request, photos, history, bill, payment records and feedback will be removed, and its appointment released." onClose={() => !removal.busy && setRemoving(false)}>
       <div className="dialog-form">
         {removal.error && <Alert>{removal.error}</Alert>}
         <div className="flex justify-end gap-2">
@@ -366,6 +368,7 @@ function Record({ id, role, back }) {
           <UpdateRequest key={row.version} row={row} role={role} refresh={async () => { await load(); setUpdated(true); }} back={back} />
           <RequestEmails row={row} role={role} refresh={() => load()} />
           <RequestInvoice key={'invoice-' + row.version} row={row} role={role} refresh={() => load()} />
+          <RequestPayments key={'payments-' + row.version} row={row} role={role} refresh={() => load()} />
           <RequestFeedback row={row} />
           <RequestSms row={row} role={role} refresh={() => load()} />
           <section className="panel record-panel"><h2>Assignment history</h2>
@@ -445,7 +448,7 @@ export default function Admin() {
   if (!user) return <Login onLogin={setUser} />;
   if (user.role === 'technician') return <TechnicianPortal user={user} logout={logout} loggingOut={loggingOut} logoutError={error} />;
 
-  const sections = [['queue', 'Requests', ClipboardList]];
+  const sections = [['queue', 'Requests', ClipboardList], ['appointments', 'Appointments', History]];
   if (user.role === 'owner') sections.push(
     ['technicians', 'Technicians', Users], ['reports', 'Reports', ChartColumn],
     ['settings', 'Service settings', Settings2], ['audit', 'Activity log', History],
@@ -469,6 +472,7 @@ export default function Admin() {
           setQueueVersion((value) => value + 1);
         }} />
         {tab === 'queue' && (record ? <Record key={record} id={record} role={user.role} back={() => open(null)} /> : <Queue username={user.username} open={open} refreshVersion={queueVersion} onLoaded={setQueueLoaded} />)}
+        {tab === 'appointments' && <AdminAppointments role={user.role} open={id => { setTab('queue'); open(id); }} />}
         {tab === 'settings' && <AdminConfig />}
         {tab === 'technicians' && <Technicians />}
         {tab === 'reports' && <Reports />}

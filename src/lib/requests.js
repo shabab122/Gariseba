@@ -2,6 +2,7 @@
 const { HttpError } = require('./http');
 const { sha256, safeEqualHex } = require('./security');
 const { STATUS_TEXT } = require('./business');
+const { paymentSummary } = require('./payments');
 
 const draftMs = 3 * 60 * 60 * 1000;
 const submitted = { state: 'submitted' };
@@ -9,7 +10,7 @@ const statusHistory = (row) => row.history.map(({ status, created_at }) => ({ st
 const publicProjection = {
   _id: 1, public_code: 1, tracking_token_hash: 1, status: 1, language: 1, request_type: 1,
   created_at: 1, updated_at: 1, history: 1, final_bill_note: 1, version: 1, consent_status_email: 1, arrival_eta: 1,
-  consent_status_sms: 1, invoice: 1, feedback: 1,
+  consent_status_sms: 1, invoice: 1, feedback: 1, payments: 1, customer_id: 1,
 };
 
 function draftRef(req) {
@@ -42,6 +43,7 @@ function trackView(row, lang) {
     history: statusHistory(row), liveTracking: 'unavailable',
     emailUpdates: row.consent_status_email === true,
     smsUpdates: row.consent_status_sms === true,
+    payment: row.status === 'completed' ? paymentSummary(row) : null,
     invoice: row.status === 'completed' && row.invoice ? {
       number: row.invoice.number, revision: row.invoice.revision, total_poisha: row.invoice.total_poisha, issued_at: row.invoice.issued_at,
     } : null,
@@ -55,6 +57,7 @@ async function deleteRequest(db, id) {
   const result = await db.requests.replaceOne({ _id: id, ...submitted }, {
     _id: id, state: 'deleted', expiresAt: new Date(Date.now() + draftMs),
   });
+  if (result.matchedCount === 1 && db.appointments) await db.appointments.updateMany({ 'booking.request_id': id }, { $unset: { booking: '' }, $inc: { version: 1 } });
   return result.matchedCount === 1;
 }
 

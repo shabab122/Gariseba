@@ -12,6 +12,8 @@ const RequestWizard = lazy(() => import('./request.jsx'));
 const Assistant = lazy(() => import('./assistant.jsx'));
 const Track = lazy(() => import('./track.jsx'));
 const Admin = lazy(() => import('./admin.jsx'));
+const CustomerAccount = lazy(() => import('./customer-account.jsx'));
+const Appointments = lazy(() => import('./appointments.jsx'));
 
 function Loading() {
   const { t } = useApp();
@@ -34,6 +36,8 @@ createRoot(document.getElementById('root')).render(
               <Route path="/request" element={<RequestWizard />} />
               <Route path="/assistant" element={<Assistant />} />
               <Route path="/track" element={<Track />} />
+              <Route path="/account" element={<CustomerAccount />} />
+              <Route path="/appointments" element={<Appointments />} />
               <Route path="/privacy" element={<Privacy />} />
               <Route path="*" element={<Unavailable />} />
             </Route>

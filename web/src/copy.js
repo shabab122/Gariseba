@@ -1,3 +1,4 @@
+import { portalCopy } from './portal-copy.js';
 export const en = {
   brand: 'GariSeba', skip: 'Skip to content', services: 'Services', assistant: 'Ask the assistant', track: 'Track request',
   request: 'Request help', language: 'Switch language to Bangla', theme: 'Change color theme', menu: 'Toggle navigation',
@@ -80,7 +81,7 @@ export const en = {
   confirmed: 'Technician confirmed', pending: 'Technician confirmation pending', live: 'This page shows team updates. Live vehicle location is unavailable.',
   bill: 'Final bill note', manage: 'Manage your information', correct: 'Request a correction', correction: 'What needs to be corrected?',
   correctSent: 'Correction sent for staff review.', delete: 'Delete this request', deleteTitle: 'Permanently delete this request?',
-  deleteBody: 'This removes the request, its photos, and its tracking history from the active system.', deleted: 'Your request and photos were deleted.',
+  deleteBody: 'This removes the request, photos, history, bill, payment records and feedback from the active system and releases its appointment.', deleted: 'Your request and photos were deleted.',
   cancel: 'Cancel', confirmDelete: 'Delete request', close: 'Close', retry: 'Try again', loadError: 'Could not connect to the service.',
   emailAddress: 'Email for status updates', emailUpdates: 'Email status updates',
   emailConsent: 'Email me when staff change my request status.',
@@ -183,7 +184,7 @@ export const bn = {
   confirmed: 'টেকনিশিয়ান নিশ্চিত', pending: 'টেকনিশিয়ানের নিশ্চিতকরণের অপেক্ষায়', live: 'এই পাতায় টিমের আপডেট দেখাবে। লাইভ গাড়ির অবস্থান পাওয়া যায় না।',
   bill: 'চূড়ান্ত বিলের নোট', manage: 'আপনার তথ্য পরিচালনা করুন', correct: 'সংশোধনের অনুরোধ', correction: 'কী সংশোধন করতে হবে?',
   correctSent: 'স্টাফের কাছে সংশোধনের অনুরোধ পাঠানো হয়েছে।', delete: 'এই অনুরোধ মুছুন', deleteTitle: 'অনুরোধটি স্থায়ীভাবে মুছবেন?',
-  deleteBody: 'সক্রিয় সিস্টেম থেকে অনুরোধ, ছবি ও স্ট্যাটাসের ইতিহাস মুছে যাবে।', deleted: 'আপনার অনুরোধ ও ছবি মুছে ফেলা হয়েছে।',
+  deleteBody: 'সক্রিয় সিস্টেম থেকে অনুরোধ, ছবি, ইতিহাস, বিল, পেমেন্টের রেকর্ড ও মতামত মুছে যাবে এবং অ্যাপয়েন্টমেন্টের সময় খালি হবে।', deleted: 'আপনার অনুরোধ ও ছবি মুছে ফেলা হয়েছে।',
   cancel: 'বাতিল', confirmDelete: 'অনুরোধ মুছুন', close: 'বন্ধ করুন', retry: 'আবার চেষ্টা করুন', loadError: 'সেবার সঙ্গে সংযোগ করা যায়নি।',
   emailAddress: 'স্ট্যাটাসের আপডেট পাওয়ার ইমেইল', emailUpdates: 'ইমেইলে স্ট্যাটাসের আপডেট',
   emailConsent: 'স্টাফ অনুরোধের স্ট্যাটাস বদলালে আমাকে ইমেইল পাঠান।',
@@ -236,4 +237,8 @@ bn.privacySections.push(
   ['SMS স্ট্যাটাস আপডেট', 'আলাদা সম্মতি দিলে SMS পাঠাতে Twilio আপনার কলব্যাক নম্বর, অনুরোধের রেফারেন্স ও স্ট্যাটাস পাবে। রেফারেন্স ও গোপন কী দিয়ে ট্র্যাকিং পাতা থেকে আপডেট বন্ধ করতে পারবেন। আগে পাঠানো বার্তা আসতে পারে এবং provider-এর সংরক্ষণ নীতি অনুযায়ী থাকতে পারে।'],
   ['বিল ও মতামত', 'কাজ সম্পন্ন হলে গোপন ট্র্যাকিং কী দিয়ে প্রকাশিত বিল ডাউনলোড ও একবার রেটিং দিতে পারবেন। অনুমোদিত স্টাফ মতামত দেখতে পারেন। সক্রিয় অনুরোধ মুছলে তার বিল ও মতামতও মুছে যায়; আগের ডাউনলোড ও ব্যাকআপ আলাদাভাবে থাকতে পারে।'],
 );
+Object.assign(en, portalCopy.en);
+Object.assign(bn, portalCopy.bn);
+en.privacySections.push(['Customer accounts and appointments', 'Customer accounts store your name, username, password hash and recovery-code hash. Logged-in requests belong to your account; earlier requests need their private tracking key to link. Appointment reservations store a request reference and selected time. Authorized staff can record payments and refunds, which appear as a summary on your bill and tracking page.']);
+bn.privacySections.push(['গ্রাহক অ্যাকাউন্ট ও অ্যাপয়েন্টমেন্ট', 'অ্যাকাউন্টে নাম, ইউজারনেম, পাসওয়ার্ডের হ্যাশ ও রিকভারি কোডের হ্যাশ থাকে। লগইন করে পাঠানো অনুরোধ অ্যাকাউন্টে যুক্ত হয়; পুরোনো অনুরোধ যুক্ত করতে গোপন ট্র্যাকিং কী লাগে। অ্যাপয়েন্টমেন্টে অনুরোধের রেফারেন্স ও বেছে নেওয়া সময় রাখা হয়। অনুমোদিত স্টাফের সংরক্ষিত পেমেন্ট ও ফেরত টাকার সারসংক্ষেপ বিল ও ট্র্যাকিং পাতায় দেখা যায়।']);
 export const copy = { en, bn };

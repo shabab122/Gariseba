@@ -8,6 +8,8 @@ const config = require('./config');
 const { connectDatabase, ensureDefaults } = require('./db');
 const { publicRoutes } = require('./routes/public');
 const { adminRoutes } = require('./routes/admin');
+const { customerRoutes } = require('./routes/customer');
+const { appointmentRoutes } = require('./routes/appointments');
 const { HttpError } = require('./lib/http');
 const sec = require('./lib/security');
 const { startEmailWorker } = require('./lib/notifications');
@@ -48,6 +50,8 @@ function createApp(db, { analyzer, aiConnectionTest, email = config.email, deliv
     next();
   }, limits.general, express.json({ limit: '50kb' }), sec.sessionMiddleware(db), sec.csrfProtect);
   app.use('/api', publicRoutes(db, limits, analyzer, email, sms));
+  app.use('/api/appointments', appointmentRoutes(db, limits));
+  app.use('/api/customer', customerRoutes(db, limits));
   app.use('/api/admin', adminRoutes(db, limits, aiConnectionTest, email, deliveryFetcher, sms, smsFetcher));
   app.use('/api', (req, res) => res.status(404).json({ error: 'not_found', message: 'This endpoint does not exist.' }));
 
@@ -59,7 +63,7 @@ function createApp(db, { analyzer, aiConnectionTest, email = config.email, deliv
         ? 'public, max-age=31536000, immutable' : 'no-cache');
     },
   }));
-  app.get(['/', '/request', '/assistant', '/track', '/privacy', '/admin'], (req, res) => {
+  app.get(['/', '/request', '/assistant', '/track', '/privacy', '/admin', '/account', '/appointments'], (req, res) => {
     const index = path.join(dist, 'index.html');
     res.set('Cache-Control', 'no-cache');
     if (!fs.existsSync(index)) return res.status(503).type('text').send('Run npm run build, or use the Vite URL printed by npm run dev.');
